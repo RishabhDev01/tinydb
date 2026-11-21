@@ -1,0 +1,59 @@
+{
+  "issue": 3,
+  "round": 1,
+  "branch": "autose/issue-3",
+  "run": "https://github.com/RishabhDev01/tinydb/actions/runs/44937234625",
+  "models": {
+    "planner": "openai/gpt-oss-120b",
+    "builder": "openai/gpt-oss-120b",
+    "judge": "qwen/qwen3.8-27b",
+    "guard": "meta-llama/llama-prompt-guard-2-86m"
+  },
+  "attempts": {},
+  "design_reentries": 0,
+  "status": "stopped",
+  "history": [
+    {
+      "t": "2026-11-21T18:45:42Z",
+      "round": 1,
+      "stage": "setup",
+      "result": "ok",
+      "detail": "start=guard base=585c29b"
+    },
+    {
+      "t": "2026-11-21T18:45:45Z",
+      "round": 1,
+      "stage": "guard",
+      "result": "pass",
+      "detail": "max score 0.001"
+    },
+    {
+      "t": "2026-11-21T18:47:39Z",
+      "round": 1,
+      "stage": "spec",
+      "result": "STOPPED",
+      "detail": "LLMError: planner: HTTP 413: {'message': 'Request too large for model `openai/gpt-oss-120b` in organization `org_01m7zn8thkem0bnynxm3se75fz` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Requested 8033, please reduce your message size and try again. Need more tokens? Upgrade to De"
+    }
+  ],
+  "tokens": {
+    "guard": {
+      "prompt": 271,
+      "completion": 0,
+      "calls": 1
+    },
+    "planner": {
+      "prompt": 18551,
+      "completion": 1477,
+      "calls": 6
+    }
+  },
+  "updated": "2026-11-21T18:47:39Z",
+  "baseline_passed": 227,
+  "next": "spec",
+  "guard": {
+    "max_score": 0.0006973555427975953,
+    "chunks": 1
+  },
+  "stopped_at": "spec",
+  "stop_reason": "LLMError: planner: HTTP 413: {'message': 'Request too large for model `openai/gpt-oss-120b` in organization `org_01m7zn8thkem0bnynxm3se75fz` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Requested 8033, please reduce your message size and try again. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}Error code: 413 - Request too large for model `openai/gpt-oss-120b` in organization `org_01m7zn8thkem0bnynxm3se75fz` serv"
+}
