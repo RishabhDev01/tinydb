@@ -36,6 +36,35 @@ class RequestTooLarge(LLMError):
     limit (8,000 for gpt-oss-120b on the free tier; see ADR-013)."""
 
 
+class QuotaExhausted(LLMError):
+    """A 429 asked us to wait longer than LONG_WAIT_S: the model's daily
+    quota is used up and no fallback model is left (ADR-015)."""
+
+
+# ADR-015: a per-minute limit never asks for more than ~60 s. A longer
+# retry-after means the daily quota is spent (run 44942070537 slept 15-28
+# min per call until the job timed out). Then we switch to a fallback model
+# with its own quota, or stop at once with a clear reason.
+LONG_WAIT_S = float(os.environ.get("AUTOSE_LONG_WAIT_S", "90"))
+FALLBACK = dict(pair.split(">", 1) for pair in os.environ.get(
+    "AUTOSE_FALLBACK", "openai/gpt-oss-120b>openai/gpt-oss-20b").split(",")
+    if ">" in pair)
+_EXHAUSTED: dict = {}  # model -> seconds Groq asked us to wait
+
+
+def _route(model: str) -> str | None:
+    """The model to call: ``model`` or its first fallback with quota left."""
+    seen = set()
+    while model in _EXHAUSTED:
+        if model in seen:
+            return None
+        seen.add(model)
+        model = FALLBACK.get(model)
+        if model is None:
+            return None
+    return model
+
+
 # Reasoning settings per model family. Hidden reasoning tokens count
 # towards max_tokens and TPM, so keep them low (ADR-013). If a model rejects
 # the parameter, we drop it and remember that.
@@ -76,8 +105,16 @@ def chat(role: str, model: str, messages: list, tools: list | None = None,
     """One chat completion. Returns the message object."""
     attempt = 0
     parse_failures = 0
+    requested = model
     while True:
         attempt += 1
+        model = _route(requested)
+        if model is None:
+            waits = ", ".join(f"{m} ~{w / 60:.0f} min"
+                              for m, w in _EXHAUSTED.items())
+            raise QuotaExhausted(f"{role}: Groq daily quota used up for "
+                                 f"{requested} and its fallbacks "
+                                 f"(retry after: {waits})")
         try:
             kwargs = dict(model=model, messages=messages,
                           max_tokens=max_tokens,
@@ -93,6 +130,15 @@ def chat(role: str, model: str, messages: list, tools: list | None = None,
             break
         except RateLimitError as e:
             wait = _retry_after(e) or min(60, 2 ** attempt) + random.random()
+            if wait > LONG_WAIT_S:
+                _EXHAUSTED[model] = wait
+                nxt = _route(requested)
+                log(f"{role}: 429 on {model} asks for {wait:.0f}s, so its "
+                    f"quota is spent; "
+                    + (f"falling back to {nxt}" if nxt else "no fallback")
+                    + f" | {str(e)[:220]}")
+                attempt = 0
+                continue
             if attempt > MAX_RETRIES:
                 raise LLMError(f"{role}: still rate-limited after "
                                f"{MAX_RETRIES} retries: {e}") from e
@@ -137,6 +183,9 @@ def chat(role: str, model: str, messages: list, tools: list | None = None,
                 from e
 
     u = USAGE.setdefault(role, {"prompt": 0, "completion": 0, "calls": 0})
+    if model != requested:
+        u.setdefault("fallback_calls", {})
+        u["fallback_calls"][model] = u["fallback_calls"].get(model, 0) + 1
     if resp.usage:
         u["prompt"] += resp.usage.prompt_tokens or 0
         u["completion"] += resp.usage.completion_tokens or 0
