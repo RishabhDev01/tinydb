@@ -75,11 +75,13 @@ def chat(role: str, model: str, messages: list, tools: list | None = None,
          temperature: float = 0.2):
     """One chat completion. Returns the message object."""
     attempt = 0
+    parse_failures = 0
     while True:
         attempt += 1
         try:
             kwargs = dict(model=model, messages=messages,
-                          max_tokens=max_tokens, temperature=temperature)
+                          max_tokens=max_tokens,
+                          temperature=temperature + 0.2 * parse_failures)
             if tools:
                 kwargs["tools"] = tools
                 kwargs["tool_choice"] = "auto"
@@ -106,15 +108,27 @@ def chat(role: str, model: str, messages: list, tools: list | None = None,
             if e.status_code == 413:
                 raise RequestTooLarge(f"{role}: HTTP 413: {body[:300]}") \
                     from e
-            if e.status_code == 400 and "reasoning" in body and \
+            # The model wrote something Groq could not parse into a message
+            # or tool call (e.g. gpt-oss emitting its reasoning as the
+            # answer; seen in run 44938351640). Sampling again usually
+            # works; after two failures, also drop the reasoning setting.
+            if e.status_code == 400 and ("tool_use_failed" in body or
+                                         "output_parse_failed" in body):
+                parse_failures += 1
+                if parse_failures > 4:
+                    raise LLMError(f"{role}: model output unparseable "
+                                   f"{parse_failures} times: {body[:400]}") \
+                        from e
+                if parse_failures >= 2 and model not in _NO_REASONING_PARAM:
+                    log(f"{role}: dropping reasoning params for {model}")
+                    _NO_REASONING_PARAM.add(model)
+                log(f"{role}: unparseable output ({parse_failures}), "
+                    "resampling")
+                continue
+            if e.status_code == 400 and "reasoning_effort" in body and \
                     model not in _NO_REASONING_PARAM:
                 log(f"{role}: {model} rejects reasoning params; dropping")
                 _NO_REASONING_PARAM.add(model)
-                continue
-            # Malformed tool call from the model: sampling again often works.
-            if e.status_code == 400 and "tool_use_failed" in body \
-                    and attempt <= 2:
-                log(f"{role}: tool_use_failed, resampling")
                 continue
             if e.status_code >= 500 and attempt <= MAX_RETRIES:
                 time.sleep(min(30, 2 ** attempt))
