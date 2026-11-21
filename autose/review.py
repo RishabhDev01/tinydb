@@ -140,14 +140,15 @@ def main() -> int:
             {"role": "user", "content":
              f"<untrusted_issue number=\"{a.issue}\">\nTitle: {title}\n\n"
              f"{body}\n</untrusted_issue>\n\nPULL REQUEST #{a.pr} DIFF:\n"
-             f"```diff\n{clip(diff, 14000)}\n```\n\nReview it."}]
+             f"```diff\n{clip(diff, 6000)}\n```\n\nReview it. If the diff "
+             "is truncated, read the changed files with read_file."}]
     verdict = None
     try:
         for attempt in range(3):
             v = run_agent(role="reviewer", model=MODEL, messages=msgs,
                           tools=tools, impl=impl,
                           finish_schema=VERDICT_SCHEMA, max_turns=25,
-                          budget=BUDGET, max_chars=30000)
+                          budget=BUDGET, max_chars=15000)
             problems = validate(v, ran["tests"])
             if not problems:
                 verdict = v

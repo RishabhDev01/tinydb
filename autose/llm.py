@@ -15,7 +15,7 @@ from openai import (APIConnectionError, APIStatusError, APITimeoutError,
                     OpenAI, RateLimitError)
 
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
-MAX_RETRIES = int(os.environ.get("AUTOSE_MAX_RETRIES", "6"))
+MAX_RETRIES = int(os.environ.get("AUTOSE_MAX_RETRIES", "10"))
 
 # role -> {"prompt": int, "completion": int, "calls": int}
 USAGE: dict = {}
@@ -29,6 +29,19 @@ class LLMError(Exception):
 
 class BudgetExceeded(Exception):
     pass
+
+
+class RequestTooLarge(LLMError):
+    """HTTP 413: one request is larger than the model's tokens-per-minute
+    limit (8,000 for gpt-oss-120b on the free tier; see ADR-013)."""
+
+
+# Reasoning settings per model family. Hidden reasoning tokens count
+# towards max_tokens and TPM, so keep them low (ADR-013). If a model rejects
+# the parameter, we drop it and remember that.
+REASONING = {"openai/gpt-oss": {"reasoning_effort": "low"},
+             "qwen/": {"reasoning_effort": "none"}}
+_NO_REASONING_PARAM: set = set()
 
 
 def log(msg: str) -> None:
@@ -58,7 +71,7 @@ def total_tokens(role: str) -> int:
 
 
 def chat(role: str, model: str, messages: list, tools: list | None = None,
-         max_tokens: int = 4096, budget: int | None = None,
+         max_tokens: int = 1800, budget: int | None = None,
          temperature: float = 0.2):
     """One chat completion. Returns the message object."""
     attempt = 0
@@ -70,6 +83,10 @@ def chat(role: str, model: str, messages: list, tools: list | None = None,
             if tools:
                 kwargs["tools"] = tools
                 kwargs["tool_choice"] = "auto"
+            extra = next((v for k, v in REASONING.items()
+                          if model.startswith(k)), None)
+            if extra and model not in _NO_REASONING_PARAM:
+                kwargs["extra_body"] = extra
             resp = _get_client().chat.completions.create(**kwargs)
             break
         except RateLimitError as e:
@@ -86,6 +103,14 @@ def chat(role: str, model: str, messages: list, tools: list | None = None,
             time.sleep(min(30, 2 ** attempt))
         except APIStatusError as e:
             body = str(getattr(e, "body", "")) + str(e)
+            if e.status_code == 413:
+                raise RequestTooLarge(f"{role}: HTTP 413: {body[:300]}") \
+                    from e
+            if e.status_code == 400 and "reasoning" in body and \
+                    model not in _NO_REASONING_PARAM:
+                log(f"{role}: {model} rejects reasoning params; dropping")
+                _NO_REASONING_PARAM.add(model)
+                continue
             # Malformed tool call from the model: sampling again often works.
             if e.status_code == 400 and "tool_use_failed" in body \
                     and attempt <= 2:
