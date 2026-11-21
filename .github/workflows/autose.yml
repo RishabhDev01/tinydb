@@ -1,0 +1,180 @@
+name: AutoSE
+
+# Issue in, pull request out. Design: autose-a3 ADR-001..012.
+# gate (who may start) -> build (stages 0-5) -> review (stage 6, read-only)
+# -> post (publish review, route verdict). A human always decides the merge.
+
+on:
+  issues:
+    types: [labeled]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: Issue number
+        required: true
+      round:
+        description: Review round (1 or 2)
+        default: "1"
+      start:
+        description: Stage to start at
+        default: auto
+        type: choice
+        options: [auto, guard, spec, design, implement, release]
+
+# Nothing by default; each job asks for what it needs (ADR-005, ADR-008).
+permissions: {}
+
+# One run per issue at a time; a second trigger queues (ADR-010).
+concurrency:
+  group: autose-issue-${{ github.event.issue.number || inputs.issue }}
+  cancel-in-progress: false
+
+env:
+  PLANNER_MODEL: ${{ vars.PLANNER_MODEL || 'openai/gpt-oss-120b' }}
+  BUILDER_MODEL: ${{ vars.BUILDER_MODEL || 'openai/gpt-oss-120b' }}
+  JUDGE_MODEL: ${{ vars.JUDGE_MODEL || 'qwen/qwen3.8-27b' }}
+  REVIEWER_MODEL: ${{ vars.REVIEWER_MODEL || 'qwen/qwen3.8-27b' }}
+  GUARD_MODEL: ${{ vars.GUARD_MODEL || 'meta-llama/llama-prompt-guard-2-86m' }}
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  gate:
+    # Cheap pre-filter; the real checks are in autose/gate.py.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issues' && github.event.label.name == 'autose') ||
+      (github.event_name == 'issue_comment' &&
+       startsWith(github.event.comment.body, '/autose'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      run: ${{ steps.g.outputs.run }}
+      issue: ${{ steps.g.outputs.issue }}
+      round: ${{ steps.g.outputs.round }}
+      start: ${{ steps.g.outputs.start }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: autose
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - id: g
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -m autose.gate
+
+  build:
+    # Stages 0-5: guard, spec, design, implement <-> test, release.
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write        # push the autose/issue-N branch
+      pull-requests: write   # open/edit the PR
+      issues: write          # status comments on the issue
+      actions: write         # workflow_dispatch the CI (ADR-012)
+    outputs:
+      status: ${{ steps.o.outputs.status }}
+      pr: ${{ steps.o.outputs.pr }}
+      sha: ${{ steps.o.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q openai pytest pytest-cov -e .
+      - id: o
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python -m autose.orchestrator
+          --issue "${{ needs.gate.outputs.issue }}"
+          --round "${{ needs.gate.outputs.round }}"
+          --start "${{ needs.gate.outputs.start }}"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autose-issue-${{ needs.gate.outputs.issue }}-r${{ needs.gate.outputs.round }}-build
+          path: .autose/
+          include-hidden-files: true
+          if-no-files-found: warn
+
+  review:
+    # Stage 6: independent reviewer. Fresh runner, PR head only, read-only
+    # token, different model, own prompt (ADR-008).
+    needs: [gate, build]
+    if: needs.build.outputs.status == 'released'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    outputs:
+      status: ${{ steps.r.outputs.status }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.build.outputs.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q openai pytest pytest-cov -e .
+      - id: r
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python -m autose.review
+          --pr "${{ needs.build.outputs.pr }}"
+          --issue "${{ needs.gate.outputs.issue }}"
+          --round "${{ needs.gate.outputs.round }}"
+          --out review-out
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autose-issue-${{ needs.gate.outputs.issue }}-r${{ needs.gate.outputs.round }}-review
+          path: review-out/
+
+  post:
+    # Publish the review and route the verdict. No LLM, no API key.
+    needs: [gate, build, review]
+    if: always() && needs.build.outputs.status == 'released'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      actions: write         # re-dispatch for review round 2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: autose
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: autose-issue-${{ needs.gate.outputs.issue }}-r${{ needs.gate.outputs.round }}-review
+          path: review-out
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python -m autose.post
+          --pr "${{ needs.build.outputs.pr }}"
+          --issue "${{ needs.gate.outputs.issue }}"
+          --round "${{ needs.gate.outputs.round }}"
+          --dir review-out
