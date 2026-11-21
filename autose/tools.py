@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 OUTPUT_LIMIT = int(os.environ.get("AUTOSE_TOOL_OUTPUT_CHARS", "3000"))
-READ_MAX_LINES = 150
+READ_MAX_LINES = 80
 SECRET_RE = re.compile(r"(gsk_|ghp_|ghs_|gho_|github_pat_)[A-Za-z0-9_]{8,}")
 
 # Paths agents may never write (ADR-009: they cannot rewrite their guardrails)
@@ -87,7 +87,7 @@ class Workspace:
         if start - 1 + n < len(lines):
             more = (f"\n[file has {len(lines)} lines; call read_file with "
                     f"start_line={start + n} for more]")
-        return clip(body, limit=12000) + more
+        return clip(body, limit=5000) + more
 
     def grep(self, pattern: str, path: str = ".") -> str:
         try:
@@ -179,7 +179,7 @@ I = {"type": "integer"}
 SCHEMAS = {
     "list_dir": _fn("list_dir", "List a directory of the repository.",
                     {"path": S}, []),
-    "read_file": _fn("read_file", "Read up to 150 lines of a file, with line "
+    "read_file": _fn("read_file", "Read up to 80 lines of a file, with line "
                      "numbers.", {"path": S, "start_line": I,
                                   "max_lines": I}, ["path"]),
     "grep": _fn("grep", "Search .py/.md/.rst files with a Python regex. "

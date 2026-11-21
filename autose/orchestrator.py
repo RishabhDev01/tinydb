@@ -206,7 +206,7 @@ class Run:
         msg = chat("judge", MODELS["judge"], [
             {"role": "system", "content": prompt("judge.md")},
             {"role": "user", "content": listing}],
-            max_tokens=6000, temperature=0, budget=BUDGET["judge"])
+            max_tokens=2000, temperature=0, budget=BUDGET["judge"])
         try:
             verdicts = extract_json(msg.content or "")
         except ValueError as e:
@@ -257,7 +257,12 @@ class Run:
 
     # ---- stage 2: design ----------------------------------------------------
     def stage_design(self) -> str:
-        arch = (ROOT / "ARCHITECTURE.md").read_text("utf-8")
+        # Only §4 (invariants) and §5 (where to change what) fit the 8k TPM
+        # budget; the planner can read the rest with read_file (ADR-013).
+        full = (ROOT / "ARCHITECTURE.md").read_text("utf-8")
+        m = re.search(r"^## 4\..*?(?=^## 6\.)", full, flags=re.M | re.S)
+        arch = (m.group(0) if m else full[:5000]) + \
+            "\n(Full document: read_file('ARCHITECTURE.md').)"
         ws = Workspace(ROOT, deny_read=(".autose", "autose", ".github"))
         tools, impl = toolset(ws, ["list_dir", "read_file", "grep"])
         user = "SPEC:\n" + self.read("spec.md")
@@ -351,7 +356,7 @@ class Run:
                             messages=self.builder_msgs, tools=tools,
                             impl=impl, finish_schema=SUMMARY_SCHEMA,
                             max_turns=40, budget=BUDGET["builder"],
-                            max_chars=28000)
+                            max_chars=16000)
             ok, msg, report = self.verify()
             attempts_log.append((n, ok, msg.splitlines()[0][:150]))
             self.write_test_report(report, attempts_log,
