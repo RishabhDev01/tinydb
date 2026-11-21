@@ -335,7 +335,8 @@ class Run:
             self.acs, _ = checks.check_spec(self.read("spec.md"))
         ws = Workspace(ROOT, deny_read=(".autose", "autose", ".github"))
         tools, impl = toolset(ws, ["list_dir", "read_file", "grep",
-                                   "edit_file", "write_file", "run_tests"])
+                                   "replace_lines", "edit_file", "write_file",
+                                   "run_tests"])
         if not self.builder_msgs:
             user = ("SPEC:\n" + self.read("spec.md") + "\n\nDESIGN:\n" +
                     self.read("design.md"))
