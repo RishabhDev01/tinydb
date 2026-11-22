@@ -852,3 +852,18 @@ class Table:
 
         # Clear the query cache, as the table contents have changed
         self.clear_cache()
+
+    def pluck(self, field: str) -> list:
+        """
+        Extract the given field from all documents in the table.
+
+        Documents that do not contain the field are omitted.
+
+        :param field: The name of the field to extract.
+        :returns: A list of values for the given field.
+        """
+        values = []
+        for doc in self._read_table().values():
+            if field in doc:
+                values.append(doc[field])
+        return values

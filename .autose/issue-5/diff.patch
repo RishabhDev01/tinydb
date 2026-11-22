@@ -1,0 +1,83 @@
+diff --git a/tinydb/table.py b/tinydb/table.py
+index 76470aa..c807b2f 100644
+--- a/tinydb/table.py
++++ b/tinydb/table.py
+@@ -852,3 +852,18 @@ class Table:
+ 
+         # Clear the query cache, as the table contents have changed
+         self.clear_cache()
++
++    def pluck(self, field: str) -> list:
++        """
++        Extract the given field from all documents in the table.
++
++        Documents that do not contain the field are omitted.
++
++        :param field: The name of the field to extract.
++        :returns: A list of values for the given field.
++        """
++        values = []
++        for doc in self._read_table().values():
++            if field in doc:
++                values.append(doc[field])
++        return values
+diff --git a/tests/test_autose_issue_5.py b/tests/test_autose_issue_5.py
+new file mode 100644
+index 0000000..434ae45
+--- /dev/null
++++ b/tests/test_autose_issue_5.py
+@@ -0,0 +1,54 @@
++from tinydb import TinyDB
++from tinydb.storages import MemoryStorage
++
++
++def test_pluck_all_present():
++    """AC-1: Pluck field from documents with all fields present."""
++    db = TinyDB(storage=MemoryStorage)
++    db.insert({'name': 'alice'})
++    db.insert({'name': 'bob'})
++
++    result = db.pluck('name')
++    assert result == ['alice', 'bob']
++
++
++def test_pluck_skipping_missing():
++    """AC-2: Pluck field skipping documents missing the field."""
++    db = TinyDB(storage=MemoryStorage)
++    db.insert({'name': 'alice', 'age': 30})
++    db.insert({'age': 25})
++    db.insert({'name': 'charlie'})
++
++    result = db.pluck('name')
++    assert result == ['alice', 'charlie']
++
++
++def test_pluck_preserves_none():
++    """AC-3: Pluck preserves None values when key is present."""
++    db = TinyDB(storage=MemoryStorage)
++    db.insert({'val': None})
++    db.insert({'val': 42})
++
++    result = db.pluck('val')
++    assert result == [None, 42]
++
++
++def test_pluck_non_existent():
++    """AC-4: Pluck non-existent field."""
++    db = TinyDB(storage=MemoryStorage)
++    db.insert({'name': 'alice'})
++    db.insert({'name': 'bob'})
++
++    result = db.pluck('missing')
++    assert result == []
++
++
++def test_pluck_custom_table():
++    """AC-5: Pluck on a custom table."""
++    db = TinyDB(storage=MemoryStorage)
++    table = db.table('users')
++    table.insert({'email': 'alice@example.com'})
++    table.insert({'email': 'bob@example.com'})
++
++    result = db.table('users').pluck('email')
++    assert result == ['alice@example.com', 'bob@example.com']
