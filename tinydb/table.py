@@ -814,6 +814,7 @@ class Table:
         As a further optimization, we don't convert the documents into the
         document class, as the table data will *not* be returned to the user.
         """
+        import copy
 
         tables = self._storage.read()
 
@@ -832,7 +833,7 @@ class Table:
         # to be an instance of ``self.document_id_class`` but the storage
         # might convert dict keys to strings.
         table = {
-            self.document_id_class(doc_id): doc
+            self.document_id_class(doc_id): copy.deepcopy(doc)
             for doc_id, doc in raw_table.items()
         }
 
