@@ -62,7 +62,10 @@ TinyDB(path, storage=JSONStorage)            # database.py
 ## 4. Invariants (break these and tests fail)
 
 1. **Every write must clear the query cache.** `_update_table` does this. Never write to storage from a `Table` method any other way.
-2. **Doc IDs are `str` in storage and `int` in memory.** Convert at the boundary, as `_update_table` and `search` do.
+2. **Doc IDs are `str` in storage and `int` in memory.** Convert at the boundary, as `_update_table` and `search` do. Inside `Table` the two forms meet, so check which dict you are indexing:
+   - **`_read_table()` returns the raw storage dict, so its keys are `str`.** Read paths (`get`, `search`, `__iter__`; `contains` goes through `get`) look up `str(doc_id)` (e.g. `table.get(str(doc_id))`) and wrap results as `Document(doc, self.document_id_class(key))`.
+   - **The `updater(table)` passed to `_update_table` sees keys already converted to `document_id_class` (`int`).** Write paths (`insert`, `update`, `remove`; `upsert` goes through `update`) compare against `int` IDs.
+   - A caller's ID (e.g. `'1'` or `1`) must be converted to the form of the dict it indexes: `str(...)` for `_read_table()`, `document_id_class(...)` inside an updater. Values that cannot be converted (e.g. `float('nan')`) must simply match nothing (see `test_get_ids`).
 3. **`search()` returns a fresh list, but the cached `Document` objects are shared.** Callers must not mutate them.
 4. **`_next_id` is a cache.** `truncate()` resets it to `None`. Any new method that removes all documents must do the same.
 5. **Queries must be hashable** to be cached. `Query.test(func)` and `Query.map(fn)` are only cacheable if `func` is hashable.

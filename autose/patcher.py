@@ -133,14 +133,22 @@ def localize(root: Path, rows: list, max_chars: int = 9000) -> list:
                            "kind": "class outline",
                            "code": _outline(lines, defs[owner])})
             have.add((path, owner))
-    used = sum(len(b["code"]) for b in blocks)
-    for path, q, lines, defs in extra[:MAX_CALLEES * 2]:
+    # ADR-024: helpers get their own share of the budget. In run 22 the
+    # three large definitions used it all, so `_read_table` (whose
+    # docstring says its doc IDs are still `str`) was never shown.
+    used, budget = 0, max(2500, max_chars // 3)
+    seen, unique = set(), []
+    for item in extra:
+        if (item[0], item[1]) not in seen:
+            seen.add((item[0], item[1]))
+            unique.append(item)
+    for path, q, lines, defs in unique:
         node = defs[q]
         if (path, q) in have or node.end_lineno - _start(node) > \
                 MAX_CALLEE_LINES:
             continue
         code = _source(lines, node)
-        if used + len(code) > max_chars:
+        if used + len(code) > budget:
             continue
         blocks.append({"path": path, "name": q, "kind": "helper it calls",
                        "code": code})
