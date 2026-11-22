@@ -376,7 +376,15 @@ class Run:
         report.update(pytest_exit=code, counts=counts,
                       pytest_tail=clip(out, 2500, tail=True))
         if code != 0:
-            return False, "TESTS FAILED (stage 4 check):\n" + \
+            # ADR-024: name each failing test with its line and first error,
+            # not the raw tail of the output (run 22).
+            tally = ", ".join(f"{v} {k}" for k, v in counts.items())
+            digest = checks.failure_digest(out)
+            if digest:
+                return False, (f"TESTS FAILED (stage 4 check): {tally}. "
+                               "Each failing test, where it failed and its "
+                               "first error lines:\n" + digest), report
+            return False, f"TESTS FAILED (stage 4 check): {tally}\n" + \
                 clip(out, tail=True), report
         if counts.get("passed", 0) < self.baseline_passed:
             return False, (f"only {counts.get('passed', 0)} tests pass but "
@@ -449,8 +457,14 @@ class Run:
         m = re.search(r"^## Approach.*?(?=^## |\Z)", design, flags=re.M | re.S)
         approach = clip(m.group(0).strip() if m else design, 1500)
         system = prompt("builder_patch.md", test_path=test_path)
+        # ADR-024: the builder also gets ARCHITECTURE.md §4 (invariants), so
+        # facts such as which dicts hold str or int doc IDs reach the agent
+        # that writes the code, not only the planner.
+        m = re.search(r"^## 4\..*?(?=^## 5\.)", ARCHITECTURE_TEXT,
+                      flags=re.M | re.S)
+        invariants = m.group(0).strip() if m else ""
         failure = ("REVIEW FINDINGS / EARLIER FAILURES (fix these):\n" +
-                   self.feedback[:2000]) if self.feedback else ""
+                   clip(self.feedback, 4000)) if self.feedback else ""
         key = f"r{self.round}"
         attempts_log, msg = [], "no implementation attempt left in this round"
         while self.state["attempts"].get(key, 0) < MAX_IMPLEMENT_ATTEMPTS:
@@ -458,14 +472,17 @@ class Run:
             # not use up an attempt.
             n = self.state["attempts"].get(key, 0) + 1
             text = ""
-            # Fit one request under the 8k TPM limit (ADR-013); shrink once.
-            for code_chars, test_chars, fail_chars in ((9000, 4000, 2000),
-                                                       (5000, 2000, 1200)):
+            # ADR-024: sized for Gemini (2M TPM); the second size is the
+            # fallback after a 413 (e.g. on a Groq model, ADR-013).
+            for code_chars, test_chars, fail_chars in ((20000, 6000, 5000),
+                                                       (9000, 3000, 2500)):
                 blocks = patcher.localize(ROOT, rows, max_chars=code_chars)
                 if not blocks:
                     raise Stop("implement", "the design names no existing "
                                "definition or class under tinydb/ to change")
                 user = (acs_text + "\n\n## Design\n" + approach +
+                        ("\n\n## ARCHITECTURE.md " + invariants
+                         if invariants else "") +
                         "\n\n## Code to change (current)\n\n" +
                         patcher.render_blocks(blocks))
                 tp = ROOT / test_path
@@ -474,7 +491,9 @@ class Run:
                              clip(tp.read_text("utf-8"), test_chars) +
                              "\n```")
                 if failure:
-                    user += "\n\n" + clip(failure, fail_chars, tail=True)
+                    # The instruction and the first failing tests come first,
+                    # so keep the head (ADR-024).
+                    user += "\n\n" + clip(failure, fail_chars)
                 log(f"builder: attempt {n}, patch request "
                     f"{len(system) + len(user)} chars, blocks "
                     f"{[b['name'] for b in blocks]}")
@@ -515,8 +534,8 @@ class Run:
                 return "release"
             self.event("implement+test", "fail", f"attempt {n}: {msg}")
             failure = (f"## Attempt {n} FAILED the orchestrator's check\n"
-                       f"{msg}\nFix the cause in the code (do not weaken the "
-                       "tests) and answer again in the same format.")
+                       "Fix the cause in the code (do not weaken the tests) "
+                       f"and answer again in the same format.\n\n{msg}")
         return self.after_failed_attempts(msg)
 
     def after_failed_attempts(self, msg: str) -> str:
@@ -526,7 +545,7 @@ class Run:
             self.state["design_reentries"] += 1
             self.feedback = ("The previous design was implemented "
                              f"{MAX_IMPLEMENT_ATTEMPTS} times and still failed"
-                             ":\n" + msg[:1500])
+                             ":\n" + clip(msg, 3500))
             self.state["attempts"][key] = 0
             gh.run(["git", "checkout", self.base, "--", "tinydb", "tests"],
                    check=False)
