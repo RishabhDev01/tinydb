@@ -1,0 +1,72 @@
+diff --git a/tinydb/operations.py b/tinydb/operations.py
+index 3f6c6ab..b9a0f85 100644
+--- a/tinydb/operations.py
++++ b/tinydb/operations.py
+@@ -73,3 +73,18 @@ def decrement(field: str) -> Callable[[MutableMapping], None]:
+         doc[field] -= 1
+ 
+     return transform
++
++
++def append(field: str, val: Any) -> Callable[[MutableMapping], None]:
++    """
++    Append ``val`` to the list in ``field``.
++
++    If ``field`` does not exist, initialize it with a list containing ``val``.
++    """
++    def transform(doc: MutableMapping):
++        if field not in doc:
++            doc[field] = [val]
++        else:
++            doc[field].append(val)
++
++    return transform
+diff --git a/tests/test_autose_issue_6.py b/tests/test_autose_issue_6.py
+new file mode 100644
+index 0000000..04aeb79
+--- /dev/null
++++ b/tests/test_autose_issue_6.py
+@@ -0,0 +1,43 @@
++import pytest
++from tinydb import TinyDB, where
++from tinydb.operations import append, increment
++from tinydb.storages import MemoryStorage
++
++
++def test_append_existing_list():
++    """AC-1: Append to existing list field."""
++    db = TinyDB(storage=MemoryStorage)
++    db.insert({'id': 1, 'tags': ['urgent']})
++
++    db.update(append('tags', 'review'), where('id') == 1)
++
++    assert db.get(where('id') == 1) == {'id': 1, 'tags': ['urgent', 'review']}
++
++
++def test_append_non_existent_field():
++    """AC-2: Append to non-existent field initializes list."""
++    db = TinyDB(storage=MemoryStorage)
++    db.insert({'id': 2})
++
++    db.update(append('tags', 'urgent'), where('id') == 2)
++
++    assert db.get(where('id') == 2) == {'id': 2, 'tags': ['urgent']}
++
++
++def test_append_non_list_field():
++    """AC-3: Append to field with non-list value raises AttributeError."""
++    db = TinyDB(storage=MemoryStorage)
++    db.insert({'id': 3, 'tags': 'urgent'})
++
++    with pytest.raises(AttributeError):
++        db.update(append('tags', 'review'), where('id') == 3)
++
++
++def test_existing_operations_unchanged():
++    """AC-4: Existing operations remain unchanged."""
++    db = TinyDB(storage=MemoryStorage)
++    db.insert({'id': 4, 'count': 1})
++
++    db.update(increment('count'), where('id') == 4)
++
++    assert db.get(where('id') == 4) == {'id': 4, 'count': 2}
