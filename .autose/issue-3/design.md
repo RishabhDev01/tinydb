@@ -1,32 +1,23 @@
-# Design: Atomic update on error (issue #3)
+# Design: Atomic table updates when an updater raises an exception
 
 ## Approach
-Modify `tinydb.table.Table._update_table` to perform the update inside a `try/except` block.  Before invoking the user‑supplied `updater`, we snapshot the current table data (`raw_table`).  If the updater raises any exception, we restore the original table data to the storage and re‑raise the exception.  This guarantees that all storage backends (MemoryStorage, JSONStorage, etc.) behave atomically.  The change relies on invariants 1 (write clears cache) and 4 (truncate resets `_next_id` – not affected).
+In `Table._update_table`, when `raw_table` is retrieved from `tables[self.name]`, mutating documents in `table` (e.g. in-place modifications from `updater(table)`) directly mutates documents in `MemoryStorage.memory` if `MemoryStorage` holds references to the same dictionaries. If an unhandled exception is raised during `updater(table)` (or during doc ID processing), documents updated prior to the exception remain mutated in storage, violating atomicity.
+To ensure atomicity across all storage backends without modifying stored documents upon failure, `_update_table` will shallow/deep-copy each document dictionary (via `copy.deepcopy` or `dict(doc)`) when building `table`. Because documents may be nested mappings/data structures modified in place, using `copy.deepcopy(doc)` ensures that in-memory modifications only apply to isolated copies. Only when `updater(table)` succeeds without raising an exception are the updated documents written back to storage via `self._storage.write(tables)`.
+This preserves Invariant 1 (every write clears the query cache via `self.clear_cache()` following `_storage.write`), Invariant 2 (doc ID string/int conversions), and requires no changes to `MemoryStorage` or the storage interface.
 
 ## Files to change
 | File | Function / class | Change |
 |---|---|---|
-| tinydb/table.py | Table._update_table | Wrap updater call in try/except, restore original tables on error |
+| tinydb/table.py | Table._update_table | Deep-copy documents when constructing `table` from `raw_table` so failed updater executions do not mutate stored documents. |
+| tests/test_tinydb.py | (NEW tests) | Add test cases for AC-1, AC-2, AC-3, and AC-4 verifying atomic updates with `MemoryStorage`. |
 
 ## Test plan
 | AC | Test file | Test name |
 |---|---|---|
-| AC-1 | tests/test_atomic_update.py | test_memory_storage_atomic_update |
-| AC-2 | tests/test_atomic_update.py | test_json_storage_atomic_update |
-| AC-3 | tests/test_atomic_update.py | test_successful_update |
-| AC-4 | tests/test_atomic_update.py | test_no_match_update |
+| AC-1 | tests/test_tinydb.py | test_update_error_memory_storage_leaves_documents_unchanged |
+| AC-2 | tests/test_tinydb.py | test_update_error_with_conditional_query_leaves_documents_unchanged |
+| AC-3 | tests/test_tinydb.py | test_update_error_with_doc_ids_leaves_documents_unchanged |
+| AC-4 | tests/test_tinydb.py | test_update_success_memory_storage_persists_changes |
 
 ## Risks
-- The rollback writes the original tables back, which may trigger another write and clear the cache; this is acceptable as the operation is aborted.  Existing tests that rely on cache state after a failed update will need to be updated accordingly.
-- If the updater modifies the table in place before an exception, the snapshot must be a deep copy; we use `dict.copy()` which is shallow but sufficient because values are mappings that are not mutated outside the updater.
-
-## STOPPED at stage `design`
-
-QuotaExhausted: planner: Groq daily quota used up for openai/gpt-oss-120b and its fallbacks (retry after: openai/gpt-oss-120b ~18 min, openai/gpt-oss-20b ~4 min)
-
-The free-tier quota refills at about 8k tokens per hour per model. Comment `/autose` later to resume at this stage.
-
-
-## STOPPED at stage `design`
-
-LLMError: planner: HTTP 400: [{'error': {'code': 400, 'message': 'Invalid Auth key.', 'status': 'INVALID_ARGUMENT'}}]Error code: 400
+- Performance overhead of `copy.deepcopy` during update operations: `copy.deepcopy` is standard for JSON-serializable documents in Python and TinyDB tables are lightweight. Existing test suite covering all update operations in `tests/test_tinydb.py` and `tests/test_tables.py` will verify no regressions.
