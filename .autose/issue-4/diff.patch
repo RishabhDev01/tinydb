@@ -1,0 +1,113 @@
+diff --git a/tinydb/table.py b/tinydb/table.py
+index 76470aa..ca999ed 100644
+--- a/tinydb/table.py
++++ b/tinydb/table.py
+@@ -366,7 +366,7 @@ class Table:
+                 return None
+ 
+             # Convert the raw data to the document class
+-            return self.document_class(raw_doc, doc_id)
++            return self.document_class(raw_doc, self.document_id_class(doc_id))
+ 
+         elif doc_ids is not None:
+             # Filter the table by extracting out all those documents which
+@@ -462,7 +462,13 @@ class Table:
+             # (see issue #591). The list of *actually* updated IDs is
+             # determined inside the updater so it reflects the table state at
+             # write time.
+-            requested_ids = list(doc_ids)
++            requested_ids = []
++            for did in doc_ids:
++                try:
++                    requested_ids.append(self.document_id_class(did))
++                except (ValueError, TypeError):
++                    pass
++
+             updated_ids: list[int] = []
+ 
+             def updater(table: dict):
+@@ -645,7 +651,13 @@ class Table:
+             # ``get(doc_ids=...)`` (see issue #591). The list of *actually*
+             # removed IDs is determined inside the updater so it reflects the
+             # table state at write time.
+-            requested_ids = list(doc_ids)
++            requested_ids = []
++            for did in doc_ids:
++                try:
++                    requested_ids.append(self.document_id_class(did))
++                except (ValueError, TypeError):
++                    pass
++
+             removed_ids: list[int] = []
+ 
+             def updater(table: dict):
+diff --git a/tests/test_autose_issue_4.py b/tests/test_autose_issue_4.py
+new file mode 100644
+index 0000000..07b7c0f
+--- /dev/null
++++ b/tests/test_autose_issue_4.py
+@@ -0,0 +1,64 @@
++from tinydb import TinyDB
++from tinydb.storages import MemoryStorage
++from tinydb.table import Document
++
++
++def test_ac1_remove_string_doc_ids():
++    """AC-1: Remove documents with string doc_ids."""
++    db = TinyDB(storage=MemoryStorage)
++    table = db.table('_default')
++    doc_id = table.insert({'name': 'a'})
++    assert doc_id == 1
++
++    removed = table.remove(doc_ids=['1'])
++    assert removed == [1]
++    assert table.all() == []
++
++
++def test_ac2_update_string_doc_ids():
++    """AC-2: Update documents with string doc_ids."""
++    db = TinyDB(storage=MemoryStorage)
++    table = db.table('_default')
++    doc_id = table.insert({'name': 'a'})
++    assert doc_id == 1
++
++    updated = table.update({'name': 'b'}, doc_ids=['1'])
++    assert updated == [1]
++    assert table.get(doc_id=1) == Document({'name': 'b'}, doc_id=1)
++
++
++def test_ac3_get_string_doc_id_returns_integer_attribute():
++    """AC-3: Get document with string doc_id returns integer doc_id attribute."""
++    db = TinyDB(storage=MemoryStorage)
++    table = db.table('_default')
++    doc_id = table.insert({'name': 'a'})
++    assert doc_id == 1
++
++    doc = table.get(doc_id='1')
++    assert doc == Document({'name': 'a'}, doc_id=1)
++    assert doc.doc_id == 1
++    assert isinstance(doc.doc_id, int) is True
++
++
++def test_ac4_integer_doc_ids_unchanged():
++    """AC-4: Integer doc_ids behaviour unchanged."""
++    db = TinyDB(storage=MemoryStorage)
++    table = db.table('_default')
++    doc_id = table.insert({'name': 'a'})
++    assert doc_id == 1
++
++    removed = table.remove(doc_ids=[1])
++    assert removed == [1]
++    assert table.all() == []
++
++
++def test_ac5_non_existent_or_non_matching_string_doc_id():
++    """AC-5: Non-existent or non-matching string doc_id returns empty result."""
++    db = TinyDB(storage=MemoryStorage)
++    table = db.table('_default')
++    doc_id = table.insert({'name': 'a'})
++    assert doc_id == 1
++
++    removed = table.remove(doc_ids=['999'])
++    assert removed == []
++    assert len(table) == 1

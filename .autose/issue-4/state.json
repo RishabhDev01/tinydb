@@ -1,0 +1,30 @@
+{
+  "attempts": {
+    "r1": 1
+  },
+  "design_reentries": 1,
+  "experiment": {
+    "name": "E2",
+    "handoff": "full",
+    "rep": 2,
+    "source": "autose/issue-4"
+  },
+  "baseline_passed": 227,
+  "history": [
+    {
+      "t": "2026-11-22T07:18:30Z",
+      "round": 1,
+      "stage": "implement+test",
+      "result": "pass",
+      "detail": "attempt 1"
+    }
+  ],
+  "tokens": {
+    "builder": {
+      "prompt": 4797,
+      "completion": 3066,
+      "calls": 1
+    }
+  },
+  "updated": "2026-11-22T07:18:30Z"
+}
