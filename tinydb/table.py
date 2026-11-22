@@ -852,3 +852,18 @@ class Table:
 
         # Clear the query cache, as the table contents have changed
         self.clear_cache()
+
+    def pluck(self, field: str) -> list:
+        """
+        Extract values of a specified field across documents in insertion order.
+
+        Documents that do not contain the field are skipped.
+
+        :param field: The field name whose values should be extracted.
+        :return: A list of values for the specified field.
+        """
+        values = []
+        for doc in self:
+            if field in doc:
+                values.append(doc[field])
+        return values

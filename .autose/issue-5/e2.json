@@ -1,0 +1,17 @@
+{
+  "issue": 5,
+  "handoff": "summary",
+  "rep": 1,
+  "started": "2026-11-22T07:19:15Z",
+  "outcome": "pass",
+  "reason": "all checks pass",
+  "attempts": 2,
+  "tokens": {
+    "builder": {
+      "prompt": 4331,
+      "completion": 1361,
+      "calls": 2
+    }
+  },
+  "finished": "2026-11-22T07:19:27Z"
+}
