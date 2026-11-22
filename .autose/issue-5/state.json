@@ -1,0 +1,44 @@
+{
+  "attempts": {
+    "r1": 3
+  },
+  "design_reentries": 1,
+  "experiment": {
+    "name": "E2",
+    "handoff": "summary",
+    "rep": 2,
+    "source": "autose/issue-5"
+  },
+  "baseline_passed": 227,
+  "history": [
+    {
+      "t": "2026-11-22T07:19:20Z",
+      "round": 1,
+      "stage": "implement+test",
+      "result": "fail",
+      "detail": "attempt 1: BUILD FAILED (stage 3 check):\nTraceback (most recent call last):\n  File \"<string>\", line 1, in <module>\n  File \"/home/runner/work/tinydb/tinydb/tinydb/__init__.py\", line 30, in <module>\n    from .database import TinyDB\n  File \"/home/runner/work/tinydb/tinydb/tinydb/database.py\", line 9, i"
+    },
+    {
+      "t": "2026-11-22T07:19:33Z",
+      "round": 1,
+      "stage": "implement+test",
+      "result": "fail",
+      "detail": "attempt 2: BUILD FAILED (stage 3 check):\nTraceback (most recent call last):\n  File \"<string>\", line 1, in <module>\n  File \"/home/runner/work/tinydb/tinydb/tinydb/__init__.py\", line 30, in <module>\n    from .database import TinyDB\n  File \"/home/runner/work/tinydb/tinydb/tinydb/database.py\", line 9, i"
+    },
+    {
+      "t": "2026-11-22T07:19:38Z",
+      "round": 1,
+      "stage": "implement+test",
+      "result": "fail",
+      "detail": "attempt 3: BUILD FAILED (stage 3 check):\nTraceback (most recent call last):\n  File \"<string>\", line 1, in <module>\n  File \"/home/runner/work/tinydb/tinydb/tinydb/__init__.py\", line 30, in <module>\n    from .database import TinyDB\n  File \"/home/runner/work/tinydb/tinydb/tinydb/database.py\", line 9, i"
+    }
+  ],
+  "tokens": {
+    "builder": {
+      "prompt": 6749,
+      "completion": 3018,
+      "calls": 3
+    }
+  },
+  "updated": "2026-11-22T07:19:38Z"
+}
