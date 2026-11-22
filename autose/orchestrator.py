@@ -48,6 +48,10 @@ BUILDER_MODE = os.environ.get("BUILDER_MODE", "patch")
 # ADR-023: Gemini counts thinking as output. 3000 cut off run 21's answers
 # (3 functions + tests); 12k is about $0.045 per call on 3.8 Flash.
 BUILDER_MAX_TOKENS = int(os.environ.get("BUILDER_MAX_TOKENS", "12000"))
+# Experiment E2 (ADR-003, ADR-028): "full" = the builder gets the spec's
+# acceptance criteria and the design's approach (default); "summary" = a
+# fixed 5-line summary of both instead. The code shown is the same.
+HANDOFF = os.environ.get("HANDOFF", "full")
 MAX_IMPLEMENT_ATTEMPTS = 3
 MAX_DESIGN_REENTRIES = 1
 MAX_SPEC_REDOS = 1
@@ -58,6 +62,49 @@ CONTENT_SCHEMA = {"type": "object", "properties": {
     "required": ["content"]}
 SUMMARY_SCHEMA = {"type": "object", "properties": {
     "summary": {"type": "string"}}, "required": ["summary"]}
+
+
+def _cut(text: str, limit: int) -> str:
+    """One line, at most ``limit`` characters (ellipsis, no newline)."""
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[:limit - 1] + "…"
+
+
+def _first_sentence(text: str, limit: int = 300) -> str:
+    text = " ".join(text.split())
+    m = re.match(r"(.+?[.!?])(\s|$)", text)
+    return _cut(m.group(1) if m else text, limit)
+
+
+def handoff_summary(spec: str, design: str, acs: dict) -> str:
+    """E2 (ADR-003): five lines instead of the full spec and design.
+
+    Deterministic, so the only difference between the arms is how much of
+    the hand-off reaches the builder. The AC ids stay, because the stage-4
+    checker requires one test per AC.
+    """
+    def section(md: str, name: str) -> str:
+        m = re.search(rf"^## {name}.*?\n(.*?)(?=^## |\Z)", md,
+                      flags=re.M | re.S)
+        return m.group(1).strip() if m else ""
+
+    goal = re.search(r"^\*\*Summary:\*\*\s*(.+)$", spec, flags=re.M)
+    thens = []
+    for ac, block in acs.items():
+        t = re.search(r"\*\*Then\*\*\s*(.+)", block)
+        thens.append(f"{ac}: {_first_sentence(t.group(1), 90) if t else ''}")
+    rows = checks.parse_design_rows(design)
+    where = ", ".join(f"{r[0]}::{r[1]}" for r in rows
+                      if r and r[0].startswith("tinydb/"))
+    lines = [
+        "Goal: " + _cut(goal.group(1) if goal else "", 300),
+        "Required: " + _first_sentence(section(spec, "Required behaviour")),
+        "Tests (one per AC): " + _cut("; ".join(thens), 450),
+        "Approach: " + _first_sentence(section(design, "Approach")),
+        "Change: " + _cut(where, 300),
+    ]
+    return "## Summary of the spec and design (5 lines)\n" + "\n".join(
+        f"{i}. {line}" for i, line in enumerate(lines, 1))
 
 
 class Stop(Exception):
@@ -169,6 +216,13 @@ class Run:
                 pass   # stopped only by the Groq quota: continue (ADR-016)
             elif self.state.get("status") in ("released", "stopped"):
                 start = "guard"   # a fresh trigger after a finished run
+            elif start == "release" and exists and self.released_before():
+                # ADR-029: state.json is committed before release (the PR
+                # head must stay the commit CI tested), so a finished run
+                # looks like "running, next=release" on the branch. With an
+                # open PR from this branch it had released: start fresh.
+                # Run 29 (label on issue #5) resumed at release instead.
+                start = "guard"
         if exists:
             self.sync_with_master(fresh=(start == "guard"))
         self.base = gh.run(["git", "merge-base", "origin/master", "HEAD"])
@@ -191,12 +245,23 @@ class Run:
                            + left[:300])
             self.state["attempts"] = {}
             self.state["design_reentries"] = 0
+            self.state["conflicts"] = {}
         self.state["status"] = "running"
         self.event("setup", "ok", f"start={start} base={self.base[:7]}")
         gh.comment_issue(self.n, f"**AutoSE** round {self.round} started "
                          f"at stage `{start}`. Follow it here: "
                          f"{gh.run_url()}")
         return start
+
+    def released_before(self) -> bool:
+        """True if an open PR from this issue branch exists (ADR-029)."""
+        try:
+            prs = gh.gh_json(["pr", "list", "--repo", gh.repo(), "--head",
+                              self.branch, "--state", "open", "--json",
+                              "number"])
+        except Exception:   # noqa: BLE001 - no gh/API: keep old behaviour
+            return False
+        return bool(prs)
 
     def sync_with_master(self, fresh: bool) -> None:
         """ADR-017: merge master into an existing issue branch, so the agents
@@ -366,6 +431,19 @@ class Run:
         if not any(f.startswith("tinydb/") for f in files):
             return False, "no change under tinydb/ yet; implement the " \
                 "design.", report
+        # ADR-026: production code must not detect or special-case tests
+        # (run 27 passed CI by checking the caller's function name).
+        gaming = checks.test_gaming(gh.run(
+            ["git", "diff", self.base, "--", "tinydb"], check=False))
+        if gaming:
+            report["gaming"] = gaming
+            return False, ("TEST GAMING (stage 3 check): production code "
+                           "must never detect or special-case tests. "
+                           "Remove these lines:\n- " + "\n- ".join(gaming) +
+                           "\nIf an existing test pins the behaviour the "
+                           "issue asks to change, do not work around it: "
+                           "implement the requested behaviour and name "
+                           "that test in SUMMARY."), report
         ok, out = checks.check_build(ROOT)
         report["build"] = ok
         if not ok:
@@ -374,7 +452,8 @@ class Run:
         code, out = run_pytest(ROOT)
         counts = checks.pytest_counts(out)
         report.update(pytest_exit=code, counts=counts,
-                      pytest_tail=clip(out, 2500, tail=True))
+                      pytest_tail=clip(out, 2500, tail=True),
+                      failing=checks.failing_tests(out))
         if code != 0:
             # ADR-024: name each failing test with its line and first error,
             # not the raw tail of the output (run 22).
@@ -456,6 +535,11 @@ class Run:
         design = self.read("design.md")
         m = re.search(r"^## Approach.*?(?=^## |\Z)", design, flags=re.M | re.S)
         approach = clip(m.group(0).strip() if m else design, 1500)
+        if HANDOFF == "summary":
+            # E2 (ADR-028): replace both with the 5-line summary.
+            acs_text = handoff_summary(spec, design, self.acs or
+                                       checks.check_spec(spec)[0])
+            approach = "(see the summary above)"
         system = prompt("builder_patch.md", test_path=test_path)
         # ADR-024: the builder also gets ARCHITECTURE.md §4 (invariants), so
         # facts such as which dicts hold str or int doc IDs reach the agent
@@ -533,10 +617,37 @@ class Run:
                 self.event("implement+test", "pass", f"attempt {n}")
                 return "release"
             self.event("implement+test", "fail", f"attempt {n}: {msg}")
+            self.check_conflict(report.get("failing", []), test_path)
             failure = (f"## Attempt {n} FAILED the orchestrator's check\n"
                        "Fix the cause in the code (do not weaken the tests) "
                        f"and answer again in the same format.\n\n{msg}")
         return self.after_failed_attempts(msg)
+
+    def check_conflict(self, failing: list, test_path: str) -> None:
+        """ADR-026: stop when only existing tests keep failing, the same
+        way, under two designs. In run 27 one existing test pinned the very
+        behaviour the issue asked to change; the run retried until the
+        builder special-cased that test. Changing pinned behaviour is a
+        maintainer's decision, and AutoSE does not edit existing tests."""
+        if not failing or any(t.startswith(test_path + "::")
+                              for t in failing):
+            return
+        seen = self.state.setdefault("conflicts", {}) \
+            .setdefault(f"r{self.round}", [])
+        seen.append({"design": self.state["design_reentries"],
+                     "tests": failing})
+        same = [s for s in seen if s["tests"] == failing]
+        if len(same) >= 3 and len({s["design"] for s in same}) >= 2:
+            raise Stop("test", (
+                "CONFLICT WITH EXISTING BEHAVIOUR: in "
+                f"{len(same)} attempts under 2 designs, the only failing "
+                "tests were existing tests that pin the current behaviour: "
+                + ", ".join(f"`{t}`" for t in failing) + ". The issue seems "
+                "to ask for a change to behaviour that the project "
+                "documents and tests (see ARCHITECTURE.md §4). AutoSE does "
+                "not edit existing tests, so a maintainer must decide: "
+                "change that behaviour (update the test, then comment "
+                "`/autose`) or decline the issue."))
 
     def after_failed_attempts(self, msg: str) -> str:
         key = f"r{self.round}"

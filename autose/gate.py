@@ -39,8 +39,21 @@ def decide(event_name: str, ev: dict) -> dict:
 
     if event_name == "issue_comment":
         c = ev.get("comment", {})
-        if not (c.get("body") or "").strip().startswith("/autose"):
+        body = (c.get("body") or "").strip()
+        if not body.startswith("/autose"):
             return no("comment is not an /autose command")
+        # ADR-026: review round 2 is started by a person with
+        # `/autose round 2 <design|implement>`, which the post job suggests.
+        # The bot no longer dispatches it (run 28 was rejected as a bot
+        # event), so every run stays human-triggered.
+        cmd = re.fullmatch(r"/autose(?:\s+round\s+([12])"
+                           r"(?:\s+(design|implement))?)?",
+                           body.splitlines()[0].strip())
+        if not cmd:
+            return no("unrecognised /autose command; use `/autose` or "
+                      "`/autose round 2 <design|implement>`")
+        round_no = int(cmd.group(1) or 1)
+        start = cmd.group(2) or ("implement" if round_no > 1 else "auto")
         if c.get("author_association") not in TRUSTED:
             return no(f"commenter association "
                       f"{c.get('author_association')} is not trusted")
@@ -52,8 +65,10 @@ def decide(event_name: str, ev: dict) -> dict:
             if not m:
                 return no("/autose on a PR that AutoSE did not open")
             number = int(m.group(1))
-        return {"run": "true", "issue": number, "round": 1, "start": "auto",
-                "reason": f"/autose by {c.get('user', {}).get('login')}"}
+        return {"run": "true", "issue": number, "round": round_no,
+                "start": start,
+                "reason": f"/autose by {c.get('user', {}).get('login')}"
+                + (f" (round {round_no}, {start})" if round_no > 1 else "")}
 
     return no(f"unsupported event {event_name}")
 
