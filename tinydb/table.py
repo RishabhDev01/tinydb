@@ -366,7 +366,8 @@ class Table:
                 return None
 
             # Convert the raw data to the document class
-            return self.document_class(raw_doc, doc_id)
+            return self.document_class(raw_doc,
+                                       self.document_id_class(doc_id))
 
         elif doc_ids is not None:
             # Filter the table by extracting out all those documents which
@@ -462,7 +463,7 @@ class Table:
             # (see issue #591). The list of *actually* updated IDs is
             # determined inside the updater so it reflects the table state at
             # write time.
-            requested_ids = list(doc_ids)
+            requested_ids = self._coerce_ids(doc_ids)
             updated_ids: list[int] = []
 
             def updater(table: dict):
@@ -645,7 +646,7 @@ class Table:
             # ``get(doc_ids=...)`` (see issue #591). The list of *actually*
             # removed IDs is determined inside the updater so it reflects the
             # table state at write time.
-            requested_ids = list(doc_ids)
+            requested_ids = self._coerce_ids(doc_ids)
             removed_ids: list[int] = []
 
             def updater(table: dict):
@@ -852,3 +853,19 @@ class Table:
 
         # Clear the query cache, as the table contents have changed
         self.clear_cache()
+
+    def _coerce_ids(self, doc_ids: Iterable) -> list[int]:
+        """
+        Convert caller-supplied IDs (e.g. ``'1'``) to ``document_id_class``.
+
+        The updater passed to ``_update_table`` sees converted keys, so the
+        IDs must match that form. Values that cannot be converted cannot
+        name a document and are dropped.
+        """
+        ids = []
+        for doc_id in doc_ids:
+            try:
+                ids.append(self.document_id_class(doc_id))
+            except (TypeError, ValueError):
+                continue
+        return ids
