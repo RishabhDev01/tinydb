@@ -66,8 +66,21 @@ def now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _snapshot(path: Path) -> str:
+    return path.read_text(encoding="utf-8") if path.exists() else ""
+
+
+# ADR-017: the agents' instructions are read ONCE, here at import, from the
+# master checkout the job starts on, before setup() switches to the issue
+# branch. Runs 10-13 read them later from a stale issue branch, so code and
+# prompts did not match (run 13 crashed on a missing prompt file).
+_PROMPTS = {p.name: _snapshot(p) for p in PROMPTS.glob("*.md")}
+SKILL_TEXT = _snapshot(ROOT / "skills/spec-writer/SKILL.md")
+ARCHITECTURE_TEXT = _snapshot(ROOT / "ARCHITECTURE.md")
+
+
 def prompt(name: str, **kw) -> str:
-    text = (PROMPTS / name).read_text(encoding="utf-8")
+    text = _PROMPTS[name]
     for k, v in kw.items():
         text = text.replace("{" + k + "}", v)
     return text
@@ -134,7 +147,6 @@ class Run:
                     f"origin/{self.branch}"])
         else:
             gh.run(["git", "checkout", "-B", self.branch, "origin/master"])
-        self.base = gh.run(["git", "merge-base", "origin/master", "HEAD"])
         if (self.dir / "state.json").exists():
             self.state = json.loads(self.read("state.json"))
         self.state.update({"issue": self.n, "round": self.round,
@@ -152,14 +164,23 @@ class Run:
                 pass   # stopped only by the Groq quota: continue (ADR-016)
             elif self.state.get("status") in ("released", "stopped"):
                 start = "guard"   # a fresh trigger after a finished run
+        if exists:
+            self.sync_with_master(fresh=(start == "guard"))
+        self.base = gh.run(["git", "merge-base", "origin/master", "HEAD"])
         if start == "guard" and self.state.get("history"):
             # A fresh start must not build on an earlier run's code (run 12
-            # left a half-written test file on the branch).
-            for cmd in (["git", "checkout", "origin/master", "--", "tinydb",
-                         "tests", "docs"],
-                        ["git", "clean", "-fdq", "--", "tinydb", "tests",
-                         "docs"]):
-                gh.run(cmd, check=False)
+            # left a half-written test file on the branch). --no-overlay
+            # also deletes tracked files that master does not have; plain
+            # checkout only overwrites (found reproducing run 13).
+            for d in ("tinydb", "tests", "docs"):
+                gh.run(["git", "checkout", "--no-overlay", "origin/master",
+                        "--", d], check=False)
+                gh.run(["git", "clean", "-fdq", "--", d], check=False)
+            left = gh.run(["git", "diff", "--name-only", "origin/master",
+                           "--", "tinydb", "tests", "docs"], check=False)
+            if left:
+                raise Stop("setup", "could not reset the code to master: "
+                           + left[:300])
             self.state["attempts"] = {}
             self.state["design_reentries"] = 0
         self.state["status"] = "running"
@@ -168,6 +189,24 @@ class Run:
                          f"at stage `{start}`. Follow it here: "
                          f"{gh.run_url()}")
         return start
+
+    def sync_with_master(self, fresh: bool) -> None:
+        """ADR-017: merge master into an existing issue branch, so the agents
+        see the current tinydb/, tests/, ARCHITECTURE.md and skill, and the
+        review job (which runs from the PR head) runs the current autose/.
+        On a fresh start master wins any conflict, since the code is reset
+        to master anyway. On a resume a conflict stops the run instead."""
+        cmd = ["git", "merge", "--no-edit", "-m",
+               f"AutoSE: sync {self.branch} with master"]
+        if fresh:
+            cmd[2:2] = ["-X", "theirs"]
+        try:
+            gh.run(cmd + ["origin/master"])
+        except RuntimeError as e:
+            gh.run(["git", "merge", "--abort"], check=False)
+            raise Stop("setup", f"{self.branch} could not be merged with "
+                       f"master ({e}). Delete the branch to start over.")
+        log(f"setup: {self.branch} synced with master")
 
     def baseline(self) -> None:
         """Count passing tests on master, so tests cannot silently vanish."""
@@ -235,7 +274,7 @@ class Run:
         return problems
 
     def stage_spec(self) -> str:
-        skill = (ROOT / "skills/spec-writer/SKILL.md").read_text("utf-8")
+        skill = SKILL_TEXT
         ws = Workspace(ROOT, deny_read=(".autose", "autose", ".github"))
         tools, impl = toolset(ws, ["list_dir", "read_file", "grep"])
         msgs = [{"role": "system",
@@ -273,7 +312,7 @@ class Run:
     def stage_design(self) -> str:
         # Only §4 (invariants) and §5 (where to change what) fit the 8k TPM
         # budget; the planner can read the rest with read_file (ADR-013).
-        full = (ROOT / "ARCHITECTURE.md").read_text("utf-8")
+        full = ARCHITECTURE_TEXT
         m = re.search(r"^## 4\..*?(?=^## 6\.)", full, flags=re.M | re.S)
         arch = (m.group(0) if m else full[:5000]) + \
             "\n(Full document: read_file('ARCHITECTURE.md').)"
@@ -646,12 +685,12 @@ The `.autose/` folder holds the audit trail and can be deleted before merging.
 
     # ---- driver ------------------------------------------------------------
     def main(self) -> int:
-        stage = self.setup()
         stages = {"guard": self.stage_guard, "spec": self.stage_spec,
                   "design": self.stage_design,
                   "implement": self.stage_implement,
                   "release": self.stage_release}
         try:
+            stage = self.setup()
             if self.round > 1:
                 self.load_review_feedback()
             if stage not in ("guard", "spec"):
