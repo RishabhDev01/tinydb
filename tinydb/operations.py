@@ -73,3 +73,16 @@ def decrement(field: str) -> Callable[[MutableMapping], None]:
         doc[field] -= 1
 
     return transform
+
+
+def append(field: str, val: Any,
+           default: list = []) -> Callable[[MutableMapping], None]:
+    """
+    Append ``val`` to the list in a given field.
+
+    If the document does not have the field yet, a new list is started.
+    """
+    def transform(doc: MutableMapping):
+        doc.setdefault(field, default).append(val)
+
+    return transform
