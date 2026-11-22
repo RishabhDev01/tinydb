@@ -366,7 +366,7 @@ class Table:
                 return None
 
             # Convert the raw data to the document class
-            return self.document_class(raw_doc, doc_id)
+            return self.document_class(raw_doc, self.document_id_class(doc_id))
 
         elif doc_ids is not None:
             # Filter the table by extracting out all those documents which
@@ -462,7 +462,12 @@ class Table:
             # (see issue #591). The list of *actually* updated IDs is
             # determined inside the updater so it reflects the table state at
             # write time.
-            requested_ids = list(doc_ids)
+            requested_ids = []
+            for doc_id in doc_ids:
+                try:
+                    requested_ids.append(self.document_id_class(doc_id))
+                except (ValueError, TypeError):
+                    pass
             updated_ids: list[int] = []
 
             def updater(table: dict):
@@ -645,7 +650,12 @@ class Table:
             # ``get(doc_ids=...)`` (see issue #591). The list of *actually*
             # removed IDs is determined inside the updater so it reflects the
             # table state at write time.
-            requested_ids = list(doc_ids)
+            requested_ids = []
+            for doc_id in doc_ids:
+                try:
+                    requested_ids.append(self.document_id_class(doc_id))
+                except (ValueError, TypeError):
+                    pass
             removed_ids: list[int] = []
 
             def updater(table: dict):
