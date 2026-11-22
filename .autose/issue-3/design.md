@@ -25,3 +25,8 @@ Modify `tinydb.table.Table._update_table` to perform the update inside a `try/ex
 QuotaExhausted: planner: Groq daily quota used up for openai/gpt-oss-120b and its fallbacks (retry after: openai/gpt-oss-120b ~18 min, openai/gpt-oss-20b ~4 min)
 
 The free-tier quota refills at about 8k tokens per hour per model. Comment `/autose` later to resume at this stage.
+
+
+## STOPPED at stage `design`
+
+LLMError: planner: HTTP 400: [{'error': {'code': 400, 'message': 'Invalid Auth key.', 'status': 'INVALID_ARGUMENT'}}]Error code: 400

@@ -2,10 +2,10 @@
   "issue": 3,
   "round": 1,
   "branch": "autose/issue-3",
-  "run": "https://github.com/RishabhDev01/tinydb/actions/runs/44973325961",
+  "run": "https://github.com/RishabhDev01/tinydb/actions/runs/44979414380",
   "models": {
-    "planner": "openai/gpt-oss-120b",
-    "builder": "openai/gpt-oss-120b",
+    "planner": "gemini-3.8-flash",
+    "builder": "gemini-3.8-flash",
     "judge": "qwen/qwen3.8-27b",
     "guard": "meta-llama/llama-prompt-guard-2-86m"
   },
@@ -152,29 +152,24 @@
       "stage": "design",
       "result": "STOPPED",
       "detail": "QuotaExhausted: planner: Groq daily quota used up for openai/gpt-oss-120b and its fallbacks (retry after: openai/gpt-oss-120b ~18 min, openai/gpt-oss-20b ~4 min)\n\nThe free-tier quota refills at about 8k tokens per hour per model. Comment `/autose` later to resume at this stage."
+    },
+    {
+      "t": "2026-11-22T03:11:00Z",
+      "round": 1,
+      "stage": "setup",
+      "result": "ok",
+      "detail": "start=design base=2530478"
+    },
+    {
+      "t": "2026-11-22T03:11:02Z",
+      "round": 1,
+      "stage": "design",
+      "result": "STOPPED",
+      "detail": "LLMError: planner: HTTP 400: [{'error': {'code': 400, 'message': 'Invalid Auth key.', 'status': 'INVALID_ARGUMENT'}}]Error code: 400"
     }
   ],
-  "tokens": {
-    "guard": {
-      "prompt": 271,
-      "completion": 0,
-      "calls": 1
-    },
-    "planner": {
-      "prompt": 20725,
-      "completion": 1550,
-      "calls": 8,
-      "fallback_calls": {
-        "openai/gpt-oss-20b": 6
-      }
-    },
-    "judge": {
-      "prompt": 392,
-      "completion": 138,
-      "calls": 1
-    }
-  },
-  "updated": "2026-11-22T01:53:18Z",
+  "tokens": {},
+  "updated": "2026-11-22T03:11:02Z",
   "baseline_passed": 227,
   "next": "design",
   "guard": {
@@ -182,7 +177,7 @@
     "chunks": 1
   },
   "stopped_at": "design",
-  "stop_reason": "QuotaExhausted: planner: Groq daily quota used up for openai/gpt-oss-120b and its fallbacks (retry after: openai/gpt-oss-120b ~18 min, openai/gpt-oss-20b ~4 min)\n\nThe free-tier quota refills at about 8k tokens per hour per model. Comment `/autose` later to resume at this stage.",
+  "stop_reason": "LLMError: planner: HTTP 400: [{'error': {'code': 400, 'message': 'Invalid Auth key.', 'status': 'INVALID_ARGUMENT'}}]Error code: 400",
   "judge": {
     "AC-1": {
       "testable": true,
@@ -196,6 +191,5 @@
       "testable": true,
       "reason": "The criterion specifies concrete input data, a single function call with specific arguments, and exact observable results (specific exception type and unchanged state) that can be verified deterministically."
     }
-  },
-  "resume_at": "design"
+  }
 }
