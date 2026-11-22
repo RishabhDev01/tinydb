@@ -48,6 +48,10 @@ BUILDER_MODE = os.environ.get("BUILDER_MODE", "patch")
 # ADR-023: Gemini counts thinking as output. 3000 cut off run 21's answers
 # (3 functions + tests); 12k is about $0.045 per call on 3.8 Flash.
 BUILDER_MAX_TOKENS = int(os.environ.get("BUILDER_MAX_TOKENS", "12000"))
+# Experiment E2 (ADR-003, ADR-028): "full" = the builder gets the spec's
+# acceptance criteria and the design's approach (default); "summary" = a
+# fixed 5-line summary of both instead. The code shown is the same.
+HANDOFF = os.environ.get("HANDOFF", "full")
 MAX_IMPLEMENT_ATTEMPTS = 3
 MAX_DESIGN_REENTRIES = 1
 MAX_SPEC_REDOS = 1
@@ -58,6 +62,49 @@ CONTENT_SCHEMA = {"type": "object", "properties": {
     "required": ["content"]}
 SUMMARY_SCHEMA = {"type": "object", "properties": {
     "summary": {"type": "string"}}, "required": ["summary"]}
+
+
+def _cut(text: str, limit: int) -> str:
+    """One line, at most ``limit`` characters (ellipsis, no newline)."""
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[:limit - 1] + "…"
+
+
+def _first_sentence(text: str, limit: int = 300) -> str:
+    text = " ".join(text.split())
+    m = re.match(r"(.+?[.!?])(\s|$)", text)
+    return _cut(m.group(1) if m else text, limit)
+
+
+def handoff_summary(spec: str, design: str, acs: dict) -> str:
+    """E2 (ADR-003): five lines instead of the full spec and design.
+
+    Deterministic, so the only difference between the arms is how much of
+    the hand-off reaches the builder. The AC ids stay, because the stage-4
+    checker requires one test per AC.
+    """
+    def section(md: str, name: str) -> str:
+        m = re.search(rf"^## {name}.*?\n(.*?)(?=^## |\Z)", md,
+                      flags=re.M | re.S)
+        return m.group(1).strip() if m else ""
+
+    goal = re.search(r"^\*\*Summary:\*\*\s*(.+)$", spec, flags=re.M)
+    thens = []
+    for ac, block in acs.items():
+        t = re.search(r"\*\*Then\*\*\s*(.+)", block)
+        thens.append(f"{ac}: {_first_sentence(t.group(1), 90) if t else ''}")
+    rows = checks.parse_design_rows(design)
+    where = ", ".join(f"{r[0]}::{r[1]}" for r in rows
+                      if r and r[0].startswith("tinydb/"))
+    lines = [
+        "Goal: " + _cut(goal.group(1) if goal else "", 300),
+        "Required: " + _first_sentence(section(spec, "Required behaviour")),
+        "Tests (one per AC): " + _cut("; ".join(thens), 450),
+        "Approach: " + _first_sentence(section(design, "Approach")),
+        "Change: " + _cut(where, 300),
+    ]
+    return "## Summary of the spec and design (5 lines)\n" + "\n".join(
+        f"{i}. {line}" for i, line in enumerate(lines, 1))
 
 
 class Stop(Exception):
@@ -471,6 +518,11 @@ class Run:
         design = self.read("design.md")
         m = re.search(r"^## Approach.*?(?=^## |\Z)", design, flags=re.M | re.S)
         approach = clip(m.group(0).strip() if m else design, 1500)
+        if HANDOFF == "summary":
+            # E2 (ADR-028): replace both with the 5-line summary.
+            acs_text = handoff_summary(spec, design, self.acs or
+                                       checks.check_spec(spec)[0])
+            approach = "(see the summary above)"
         system = prompt("builder_patch.md", test_path=test_path)
         # ADR-024: the builder also gets ARCHITECTURE.md §4 (invariants), so
         # facts such as which dicts hold str or int doc IDs reach the agent

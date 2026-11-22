@@ -1,0 +1,76 @@
+name: AutoSE experiment E2
+# Experiment E2 (ADR-003, ADR-028): the builder alone (stages 3+4), with the
+# spec and design frozen from each issue's AutoSE branch, given either the
+# full hand-off or a 5-line summary. Results go to e2/* branches only.
+# Started by hand only.
+on:
+  workflow_dispatch:
+    inputs:
+      issues:
+        description: "Fork issue numbers, comma-separated"
+        required: false
+        default: "3,4,5,6,7"
+      variants:
+        description: "Hand-off variants, comma-separated (full, summary)"
+        required: false
+        default: "full,summary"
+      reps:
+        description: "Repetitions per issue and variant (1-3)"
+        required: false
+        default: "2"
+
+permissions: {}
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - id: m
+        env:
+          ISSUES: ${{ inputs.issues }}
+          VARIANTS: ${{ inputs.variants }}
+          REPS: ${{ inputs.reps }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          issues = [int(x) for x in re.findall(r"\d+", os.environ["ISSUES"])]
+          variants = [v for v in re.findall(r"[a-z]+", os.environ["VARIANTS"])
+                      if v in ("full", "summary")]
+          reps = max(1, min(3, int(os.environ["REPS"] or 1)))
+          inc = [{"issue": i, "handoff": v, "rep": r}
+                 for i in issues for v in variants for r in range(1, reps + 1)]
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write("matrix=" + json.dumps({"include": inc}) + "\n")
+          print(len(inc), "runs")
+          PY
+
+  builder:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write        # push e2/* result branches only
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q openai pytest pytest-cov -e .
+      - env:
+          HANDOFF: ${{ matrix.handoff }}
+          ISSUE: ${{ matrix.issue }}
+          REP: ${{ matrix.rep }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: python -m autose.experiment --issue "$ISSUE" --rep "$REP"
