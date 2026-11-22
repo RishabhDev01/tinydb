@@ -2,7 +2,7 @@
   "issue": 3,
   "round": 1,
   "branch": "autose/issue-3",
-  "run": "https://github.com/RishabhDev01/tinydb/actions/runs/44980211177",
+  "run": "https://github.com/RishabhDev01/tinydb/actions/runs/44982638273",
   "models": {
     "planner": "gemini-3.8-flash",
     "builder": "gemini-3.8-flash",
@@ -224,31 +224,17 @@
       "stage": "implement+test",
       "result": "pass",
       "detail": "attempt 1"
+    },
+    {
+      "t": "2026-11-22T03:53:59Z",
+      "round": 1,
+      "stage": "setup",
+      "result": "ok",
+      "detail": "start=release base=a326ed4"
     }
   ],
-  "tokens": {
-    "guard": {
-      "prompt": 271,
-      "completion": 0,
-      "calls": 1
-    },
-    "planner": {
-      "prompt": 124192,
-      "completion": 2399,
-      "calls": 29
-    },
-    "judge": {
-      "prompt": 592,
-      "completion": 315,
-      "calls": 1
-    },
-    "builder": {
-      "prompt": 1909,
-      "completion": 1123,
-      "calls": 1
-    }
-  },
-  "updated": "2026-11-22T03:22:59Z",
+  "tokens": {},
+  "updated": "2026-11-22T03:54:01Z",
   "baseline_passed": 227,
   "next": "release",
   "guard": {

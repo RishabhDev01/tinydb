@@ -11,7 +11,7 @@ Closes #3
 | Patch (stage 3) | `.autose/issue-3/diff.patch` |
 | Test report (stage 4) | `.autose/issue-3/test_report.md` |
 | CI (stage 5) | pending: (pending) |
-| Run | https://github.com/RishabhDev01/tinydb/actions/runs/44980211177 |
+| Run | https://github.com/RishabhDev01/tinydb/actions/runs/44982638273 |
 
 ### Stage history
 | Round | Stage | Result |
