@@ -1,0 +1,60 @@
+"""Tests for atomic update operations in TinyDB."""
+
+import pytest
+from tinydb import TinyDB, where
+from tinydb.operations import increment
+from tinydb.storages import MemoryStorage
+
+
+def test_update_fails_leaves_documents_unmodified_memory_storage():
+    """AC-1: db.all() equals [{'count': 1}, {'other': 0}, {'count': 5}]."""
+    db = TinyDB(storage=MemoryStorage)
+    db.insert({'count': 1})
+    db.insert({'other': 0})
+    db.insert({'count': 5})
+
+    with pytest.raises(KeyError):
+        db.update(increment('count'))
+
+    assert db.all() == [{'count': 1}, {'other': 0}, {'count': 5}]
+
+
+def test_update_fails_leaves_documents_unmodified_on_type_error():
+    """AC-2: db.all() equals [{'group': 'a', 'val': 10}, {'group': 'a', 'val': 'not_an_int'}]."""
+    db = TinyDB(storage=MemoryStorage)
+    db.insert({'group': 'a', 'val': 10})
+    db.insert({'group': 'a', 'val': 'not_an_int'})
+
+    with pytest.raises(TypeError):
+        db.update(increment('val'), where('group') == 'a')
+
+    assert db.all() == [
+        {'group': 'a', 'val': 10},
+        {'group': 'a', 'val': 'not_an_int'},
+    ]
+
+
+def test_update_doc_id_fails_leaves_single_document_unmodified():
+    """AC-3: db.get(doc_id=1) equals {'val': 10}."""
+    db = TinyDB(storage=MemoryStorage)
+    doc_id = db.insert({'val': 10})
+
+    def failing_updater(doc):
+        doc['val'] = 999
+        raise ValueError('operation failed')
+
+    with pytest.raises(ValueError):
+        db.update(failing_updater, doc_ids=[doc_id])
+
+    assert db.get(doc_id=1) == {'val': 10}
+
+
+def test_update_succeeds_normally():
+    """AC-4: db.all() equals [{'count': 2}, {'count': 6}]."""
+    db = TinyDB(storage=MemoryStorage)
+    db.insert({'count': 1})
+    db.insert({'count': 5})
+
+    db.update(increment('count'))
+
+    assert db.all() == [{'count': 2}, {'count': 6}]

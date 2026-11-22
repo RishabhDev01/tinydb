@@ -831,8 +831,13 @@ class Table:
         # This is required as the rest of TinyDB expects the document IDs
         # to be an instance of ``self.document_id_class`` but the storage
         # might convert dict keys to strings.
+        # We make a shallow copy of each document dict so that in-place
+        # mutations (e.g. MemoryStorage where raw_table holds the actual
+        # stored dicts) do not alter stored state if updater raises.
         table = {
-            self.document_id_class(doc_id): doc
+            self.document_id_class(doc_id): (
+                doc.copy() if hasattr(doc, 'copy') else doc
+            )
             for doc_id, doc in raw_table.items()
         }
 
