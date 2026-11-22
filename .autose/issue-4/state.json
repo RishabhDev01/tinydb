@@ -1,0 +1,37 @@
+{
+  "attempts": {
+    "r1": 2
+  },
+  "design_reentries": 1,
+  "experiment": {
+    "name": "E2",
+    "handoff": "summary",
+    "rep": 1,
+    "source": "autose/issue-4"
+  },
+  "baseline_passed": 227,
+  "history": [
+    {
+      "t": "2026-11-22T07:18:38Z",
+      "round": 1,
+      "stage": "implement+test",
+      "result": "fail",
+      "detail": "attempt 1: TESTS FAILED (stage 4 check): 1 failed, 231 passed, 1 skipped. Each failing test, where it failed and its first error lines:\n- tests/test_autose_issue_4.py::test_remove_mixed_int_and_string_doc_ids\n    tests/test_autose_issue_4.py:51: in test_remove_mixed_int_and_string_doc_ids\n        re"
+    },
+    {
+      "t": "2026-11-22T07:18:54Z",
+      "round": 1,
+      "stage": "implement+test",
+      "result": "pass",
+      "detail": "attempt 2"
+    }
+  ],
+  "tokens": {
+    "builder": {
+      "prompt": 10128,
+      "completion": 5650,
+      "calls": 2
+    }
+  },
+  "updated": "2026-11-22T07:18:54Z"
+}
