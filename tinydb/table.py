@@ -814,6 +814,7 @@ class Table:
         As a further optimization, we don't convert the documents into the
         document class, as the table data will *not* be returned to the user.
         """
+        import copy
 
         tables = self._storage.read()
 
@@ -831,8 +832,10 @@ class Table:
         # This is required as the rest of TinyDB expects the document IDs
         # to be an instance of ``self.document_id_class`` but the storage
         # might convert dict keys to strings.
+        # We deepcopy the documents so in-memory updates do not mutate the
+        # stored documents if an exception is raised during updater().
         table = {
-            self.document_id_class(doc_id): doc
+            self.document_id_class(doc_id): copy.deepcopy(doc)
             for doc_id, doc in raw_table.items()
         }
 
