@@ -1,0 +1,76 @@
+name: AutoSE review only
+# Runs the independent reviewer (ADR-008) on any PR, with no build and no
+# post job. Used for the seeded-PR calibration and experiment E1 (reviewer
+# model), ADR-027. Started by hand only (workflow_dispatch needs write access).
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "Pull request number"
+        required: true
+      issue:
+        description: "Issue the PR claims to fix"
+        required: true
+      reviewer_model:
+        description: "Reviewer model"
+        required: false
+        default: "gemini-4-hydrogen"
+
+permissions: {}
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    steps:
+      # The reviewer's own code always comes from master, never from the PR
+      # under review (a seeded or outside PR could change autose/).
+      - name: Reviewer code (master)
+        uses: actions/checkout@v4
+        with:
+          ref: master
+          path: runner
+          sparse-checkout: autose
+      - name: PR head
+        uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ inputs.pr }}/head
+          path: pr
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the PR's tinydb
+        working-directory: pr
+        run: |
+          rm -rf autose
+          pip install -q openai pytest pytest-cov -e .
+      - name: Review
+        working-directory: pr
+        env:
+          PR: ${{ inputs.pr }}
+          ISSUE: ${{ inputs.issue }}
+          REVIEWER_MODEL: ${{ inputs.reviewer_model }}
+          PYTHONPATH: ${{ github.workspace }}/runner
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rc=0
+          python -m autose.review --pr "$PR" --issue "$ISSUE" --round 1 \
+            --out "$GITHUB_WORKSPACE/review-out" || rc=$?
+          {
+            echo "## Review of PR #$PR (issue #$ISSUE) by \`$REVIEWER_MODEL\`"
+            cat "$GITHUB_WORKSPACE/review-out/review.md" 2>/dev/null \
+              || cat "$GITHUB_WORKSPACE/review-out/error.txt" 2>/dev/null
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $rc
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-pr${{ inputs.pr }}-${{ github.run_id }}
+          path: review-out/
