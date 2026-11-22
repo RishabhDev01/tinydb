@@ -19,10 +19,10 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import checks, gh
+from . import checks, gh, patcher
 from .agent import AgentStopped, run_agent
-from .llm import (USAGE, BudgetExceeded, LLMError, chat, extract_json, log,
-                  strip_think)
+from .llm import (USAGE, BudgetExceeded, LLMError, QuotaExhausted,
+                  RequestTooLarge, chat, extract_json, log, strip_think)
 from .tools import Workspace, clip, run_pytest, toolset
 
 ROOT = Path.cwd()
@@ -37,9 +37,12 @@ MODELS = {
 }
 BUDGET = {  # tokens per agent per run (ADR-009)
     "planner": int(os.environ.get("PLANNER_BUDGET", "150000")),
-    "builder": int(os.environ.get("BUILDER_BUDGET", "400000")),
+    "builder": int(os.environ.get("BUILDER_BUDGET", "120000")),
     "judge": 30000,
 }
+# ADR-016: "patch" = localize -> one-shot patch -> validate (default);
+# "agent" = the earlier free tool loop (ADR-005/014), kept for comparison.
+BUILDER_MODE = os.environ.get("BUILDER_MODE", "patch")
 MAX_IMPLEMENT_ATTEMPTS = 3
 MAX_DESIGN_REENTRIES = 1
 MAX_SPEC_REDOS = 1
@@ -63,8 +66,21 @@ def now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _snapshot(path: Path) -> str:
+    return path.read_text(encoding="utf-8") if path.exists() else ""
+
+
+# ADR-017: the agents' instructions are read ONCE, here at import, from the
+# master checkout the job starts on, before setup() switches to the issue
+# branch. Runs 10-13 read them later from a stale issue branch, so code and
+# prompts did not match (run 13 crashed on a missing prompt file).
+_PROMPTS = {p.name: _snapshot(p) for p in PROMPTS.glob("*.md")}
+SKILL_TEXT = _snapshot(ROOT / "skills/spec-writer/SKILL.md")
+ARCHITECTURE_TEXT = _snapshot(ROOT / "ARCHITECTURE.md")
+
+
 def prompt(name: str, **kw) -> str:
-    text = (PROMPTS / name).read_text(encoding="utf-8")
+    text = _PROMPTS[name]
     for k, v in kw.items():
         text = text.replace("{" + k + "}", v)
     return text
@@ -131,7 +147,6 @@ class Run:
                     f"origin/{self.branch}"])
         else:
             gh.run(["git", "checkout", "-B", self.branch, "origin/master"])
-        self.base = gh.run(["git", "merge-base", "origin/master", "HEAD"])
         if (self.dir / "state.json").exists():
             self.state = json.loads(self.read("state.json"))
         self.state.update({"issue": self.n, "round": self.round,
@@ -145,15 +160,53 @@ class Run:
         start = self.start
         if start == "auto":
             start = self.state.get("next", "guard")
-            if self.state.get("status") in ("released", "stopped") and \
-                    self.state.get("round") == self.round:
+            if self.state.pop("resume_at", None):
+                pass   # stopped only by the Groq quota: continue (ADR-016)
+            elif self.state.get("status") in ("released", "stopped"):
                 start = "guard"   # a fresh trigger after a finished run
+        if exists:
+            self.sync_with_master(fresh=(start == "guard"))
+        self.base = gh.run(["git", "merge-base", "origin/master", "HEAD"])
+        if start == "guard" and self.state.get("history"):
+            # A fresh start must not build on an earlier run's code (run 12
+            # left a half-written test file on the branch). --no-overlay
+            # also deletes tracked files that master does not have; plain
+            # checkout only overwrites (found reproducing run 13).
+            for d in ("tinydb", "tests", "docs"):
+                gh.run(["git", "checkout", "--no-overlay", "origin/master",
+                        "--", d], check=False)
+                gh.run(["git", "clean", "-fdq", "--", d], check=False)
+            left = gh.run(["git", "diff", "--name-only", "origin/master",
+                           "--", "tinydb", "tests", "docs"], check=False)
+            if left:
+                raise Stop("setup", "could not reset the code to master: "
+                           + left[:300])
+            self.state["attempts"] = {}
+            self.state["design_reentries"] = 0
         self.state["status"] = "running"
         self.event("setup", "ok", f"start={start} base={self.base[:7]}")
         gh.comment_issue(self.n, f"**AutoSE** round {self.round} started "
                          f"at stage `{start}`. Follow it here: "
                          f"{gh.run_url()}")
         return start
+
+    def sync_with_master(self, fresh: bool) -> None:
+        """ADR-017: merge master into an existing issue branch, so the agents
+        see the current tinydb/, tests/, ARCHITECTURE.md and skill, and the
+        review job (which runs from the PR head) runs the current autose/.
+        On a fresh start master wins any conflict, since the code is reset
+        to master anyway. On a resume a conflict stops the run instead."""
+        cmd = ["git", "merge", "--no-edit", "-m",
+               f"AutoSE: sync {self.branch} with master"]
+        if fresh:
+            cmd[2:2] = ["-X", "theirs"]
+        try:
+            gh.run(cmd + ["origin/master"])
+        except RuntimeError as e:
+            gh.run(["git", "merge", "--abort"], check=False)
+            raise Stop("setup", f"{self.branch} could not be merged with "
+                       f"master ({e}). Delete the branch to start over.")
+        log(f"setup: {self.branch} synced with master")
 
     def baseline(self) -> None:
         """Count passing tests on master, so tests cannot silently vanish."""
@@ -206,7 +259,7 @@ class Run:
         msg = chat("judge", MODELS["judge"], [
             {"role": "system", "content": prompt("judge.md")},
             {"role": "user", "content": listing}],
-            max_tokens=6000, temperature=0, budget=BUDGET["judge"])
+            max_tokens=2000, temperature=0, budget=BUDGET["judge"])
         try:
             verdicts = extract_json(msg.content or "")
         except ValueError as e:
@@ -221,7 +274,7 @@ class Run:
         return problems
 
     def stage_spec(self) -> str:
-        skill = (ROOT / "skills/spec-writer/SKILL.md").read_text("utf-8")
+        skill = SKILL_TEXT
         ws = Workspace(ROOT, deny_read=(".autose", "autose", ".github"))
         tools, impl = toolset(ws, ["list_dir", "read_file", "grep"])
         msgs = [{"role": "system",
@@ -257,7 +310,12 @@ class Run:
 
     # ---- stage 2: design ----------------------------------------------------
     def stage_design(self) -> str:
-        arch = (ROOT / "ARCHITECTURE.md").read_text("utf-8")
+        # Only §4 (invariants) and §5 (where to change what) fit the 8k TPM
+        # budget; the planner can read the rest with read_file (ADR-013).
+        full = ARCHITECTURE_TEXT
+        m = re.search(r"^## 4\..*?(?=^## 6\.)", full, flags=re.M | re.S)
+        arch = (m.group(0) if m else full[:5000]) + \
+            "\n(Full document: read_file('ARCHITECTURE.md').)"
         ws = Workspace(ROOT, deny_read=(".autose", "autose", ".github"))
         tools, impl = toolset(ws, ["list_dir", "read_file", "grep"])
         user = "SPEC:\n" + self.read("spec.md")
@@ -328,9 +386,12 @@ class Run:
     def stage_implement(self) -> str:
         if not self.acs:
             self.acs, _ = checks.check_spec(self.read("spec.md"))
+        if BUILDER_MODE == "patch":
+            return self.stage_implement_patch()
         ws = Workspace(ROOT, deny_read=(".autose", "autose", ".github"))
         tools, impl = toolset(ws, ["list_dir", "read_file", "grep",
-                                   "edit_file", "write_file", "run_tests"])
+                                   "replace_lines", "edit_file", "write_file",
+                                   "run_tests"])
         if not self.builder_msgs:
             user = ("SPEC:\n" + self.read("spec.md") + "\n\nDESIGN:\n" +
                     self.read("design.md"))
@@ -351,7 +412,7 @@ class Run:
                             messages=self.builder_msgs, tools=tools,
                             impl=impl, finish_schema=SUMMARY_SCHEMA,
                             max_turns=40, budget=BUDGET["builder"],
-                            max_chars=28000)
+                            max_chars=16000)
             ok, msg, report = self.verify()
             attempts_log.append((n, ok, msg.splitlines()[0][:150]))
             self.write_test_report(report, attempts_log,
@@ -365,6 +426,86 @@ class Run:
                                       f"Orchestrator check after attempt {n}"
                                       f" FAILED:\n{msg}\nFix it, run the "
                                       "full test suite, then call finish."})
+        return self.after_failed_attempts(msg)
+
+    def stage_implement_patch(self) -> str:
+        """ADR-016: the orchestrator localizes, the model answers once with
+        whole definitions and a test file, the checks validate."""
+        rows = checks.parse_design_rows(self.read("design.md"))
+        test_path = f"tests/test_autose_issue_{self.n}.py"
+        spec = self.read("spec.md")
+        m = re.search(r"^## Acceptance criteria.*?(?=^## |\Z)", spec,
+                      flags=re.M | re.S)
+        acs_text = m.group(0).strip() if m else clip(spec, 4000)
+        design = self.read("design.md")
+        m = re.search(r"^## Approach.*?(?=^## |\Z)", design, flags=re.M | re.S)
+        approach = clip(m.group(0).strip() if m else design, 1500)
+        system = prompt("builder_patch.md", test_path=test_path)
+        failure = ("REVIEW FINDINGS / EARLIER FAILURES (fix these):\n" +
+                   self.feedback[:2000]) if self.feedback else ""
+        key = f"r{self.round}"
+        attempts_log, msg = [], "no implementation attempt left in this round"
+        while self.state["attempts"].get(key, 0) < MAX_IMPLEMENT_ATTEMPTS:
+            # Counted only once the model answers, so a quota stop does
+            # not use up an attempt.
+            n = self.state["attempts"].get(key, 0) + 1
+            text = ""
+            # Fit one request under the 8k TPM limit (ADR-013); shrink once.
+            for code_chars, test_chars, fail_chars in ((9000, 4000, 2000),
+                                                       (5000, 2000, 1200)):
+                blocks = patcher.localize(ROOT, rows, max_chars=code_chars)
+                if not blocks:
+                    raise Stop("implement", "the design names no existing "
+                               "definition or class under tinydb/ to change")
+                user = (acs_text + "\n\n## Design\n" + approach +
+                        "\n\n## Code to change (current)\n\n" +
+                        patcher.render_blocks(blocks))
+                tp = ROOT / test_path
+                if tp.exists():
+                    user += (f"\n\n## Current {test_path}\n```python\n" +
+                             clip(tp.read_text("utf-8"), test_chars) +
+                             "\n```")
+                if failure:
+                    user += "\n\n" + clip(failure, fail_chars, tail=True)
+                log(f"builder: attempt {n}, patch request "
+                    f"{len(system) + len(user)} chars, blocks "
+                    f"{[b['name'] for b in blocks]}")
+                try:
+                    reply = chat("builder", MODELS["builder"], [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user}],
+                        max_tokens=3000, budget=BUDGET["builder"])
+                    text = strip_think(reply.content or "")
+                    break
+                except RequestTooLarge as e:
+                    log(f"builder: {e}; shrinking the request")
+            self.state["attempts"][key] = n
+            summary = ""
+            try:
+                answer = patcher.parse_answer(text)
+                done = patcher.apply_answer(ROOT, answer, test_path)
+                summary = answer["summary"]
+                log("builder: " + "; ".join(done))
+                ok, msg, report = self.verify()
+            except patcher.PatchError as e:
+                ok, report = False, {"files": checks.changed_files(
+                    ROOT, self.base)}
+                msg = (f"YOUR ANSWER COULD NOT BE APPLIED: {e}. Answer again "
+                       "in exactly the required format.")
+            attempts_log.append((n, ok, msg.splitlines()[0][:150]))
+            self.write_test_report(report, attempts_log, summary)
+            self.write_patch()
+            if ok:
+                self.event("implement+test", "pass", f"attempt {n}")
+                return "release"
+            self.event("implement+test", "fail", f"attempt {n}: {msg}")
+            failure = (f"## Attempt {n} FAILED the orchestrator's check\n"
+                       f"{msg}\nFix the cause in the code (do not weaken the "
+                       "tests) and answer again in the same format.")
+        return self.after_failed_attempts(msg)
+
+    def after_failed_attempts(self, msg: str) -> str:
+        key = f"r{self.round}"
         # Tests keep failing: maybe the design is wrong (ADR-002).
         if self.state["design_reentries"] < MAX_DESIGN_REENTRIES:
             self.state["design_reentries"] += 1
@@ -544,12 +685,12 @@ The `.autose/` folder holds the audit trail and can be deleted before merging.
 
     # ---- driver ------------------------------------------------------------
     def main(self) -> int:
-        stage = self.setup()
         stages = {"guard": self.stage_guard, "spec": self.stage_spec,
                   "design": self.stage_design,
                   "implement": self.stage_implement,
                   "release": self.stage_release}
         try:
+            stage = self.setup()
             if self.round > 1:
                 self.load_review_feedback()
             if stage not in ("guard", "spec"):
@@ -566,6 +707,13 @@ The `.autose/` folder holds the audit trail and can be deleted before merging.
             st = e.stage if isinstance(e, Stop) else self.state.get("next")
             reason = e.reason if isinstance(e, Stop) else \
                 f"{type(e).__name__}: {e}"
+            if isinstance(e, QuotaExhausted):
+                # Nothing failed a check: the next trigger resumes here
+                # instead of paying for spec and design again (ADR-016).
+                self.state["resume_at"] = st
+                reason += ("\n\nThe free-tier quota refills at about 8k "
+                           "tokens per hour per model. Comment `/autose` "
+                           "later to resume at this stage.")
             return self.stop(st, reason)
 
     def stop(self, stage: str, reason: str) -> int:

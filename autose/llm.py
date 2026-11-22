@@ -15,7 +15,7 @@ from openai import (APIConnectionError, APIStatusError, APITimeoutError,
                     OpenAI, RateLimitError)
 
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
-MAX_RETRIES = int(os.environ.get("AUTOSE_MAX_RETRIES", "6"))
+MAX_RETRIES = int(os.environ.get("AUTOSE_MAX_RETRIES", "10"))
 
 # role -> {"prompt": int, "completion": int, "calls": int}
 USAGE: dict = {}
@@ -29,6 +29,48 @@ class LLMError(Exception):
 
 class BudgetExceeded(Exception):
     pass
+
+
+class RequestTooLarge(LLMError):
+    """HTTP 413: one request is larger than the model's tokens-per-minute
+    limit (8,000 for gpt-oss-120b on the free tier; see ADR-013)."""
+
+
+class QuotaExhausted(LLMError):
+    """A 429 asked us to wait longer than LONG_WAIT_S: the model's daily
+    quota is used up and no fallback model is left (ADR-015)."""
+
+
+# ADR-015: a per-minute limit never asks for more than ~60 s. A longer
+# retry-after means the daily quota is spent (run 44942070537 slept 15-28
+# min per call until the job timed out). Then we switch to a fallback model
+# with its own quota, or stop at once with a clear reason.
+LONG_WAIT_S = float(os.environ.get("AUTOSE_LONG_WAIT_S", "90"))
+FALLBACK = dict(pair.split(">", 1) for pair in os.environ.get(
+    "AUTOSE_FALLBACK", "openai/gpt-oss-120b>openai/gpt-oss-20b").split(",")
+    if ">" in pair)
+_EXHAUSTED: dict = {}  # model -> seconds Groq asked us to wait
+
+
+def _route(model: str) -> str | None:
+    """The model to call: ``model`` or its first fallback with quota left."""
+    seen = set()
+    while model in _EXHAUSTED:
+        if model in seen:
+            return None
+        seen.add(model)
+        model = FALLBACK.get(model)
+        if model is None:
+            return None
+    return model
+
+
+# Reasoning settings per model family. Hidden reasoning tokens count
+# towards max_tokens and TPM, so keep them low (ADR-013). If a model rejects
+# the parameter, we drop it and remember that.
+REASONING = {"openai/gpt-oss": {"reasoning_effort": "low"},
+             "qwen/": {"reasoning_effort": "none"}}
+_NO_REASONING_PARAM: set = set()
 
 
 def log(msg: str) -> None:
@@ -58,22 +100,45 @@ def total_tokens(role: str) -> int:
 
 
 def chat(role: str, model: str, messages: list, tools: list | None = None,
-         max_tokens: int = 4096, budget: int | None = None,
+         max_tokens: int = 1800, budget: int | None = None,
          temperature: float = 0.2):
     """One chat completion. Returns the message object."""
     attempt = 0
+    parse_failures = 0
+    requested = model
     while True:
         attempt += 1
+        model = _route(requested)
+        if model is None:
+            waits = ", ".join(f"{m} ~{w / 60:.0f} min"
+                              for m, w in _EXHAUSTED.items())
+            raise QuotaExhausted(f"{role}: Groq daily quota used up for "
+                                 f"{requested} and its fallbacks "
+                                 f"(retry after: {waits})")
         try:
             kwargs = dict(model=model, messages=messages,
-                          max_tokens=max_tokens, temperature=temperature)
+                          max_tokens=max_tokens,
+                          temperature=temperature + 0.2 * parse_failures)
             if tools:
                 kwargs["tools"] = tools
                 kwargs["tool_choice"] = "auto"
+            extra = next((v for k, v in REASONING.items()
+                          if model.startswith(k)), None)
+            if extra and model not in _NO_REASONING_PARAM:
+                kwargs["extra_body"] = extra
             resp = _get_client().chat.completions.create(**kwargs)
             break
         except RateLimitError as e:
             wait = _retry_after(e) or min(60, 2 ** attempt) + random.random()
+            if wait > LONG_WAIT_S:
+                _EXHAUSTED[model] = wait
+                nxt = _route(requested)
+                log(f"{role}: 429 on {model} asks for {wait:.0f}s, so its "
+                    f"quota is spent; "
+                    + (f"falling back to {nxt}" if nxt else "no fallback")
+                    + f" | {str(e)[:220]}")
+                attempt = 0
+                continue
             if attempt > MAX_RETRIES:
                 raise LLMError(f"{role}: still rate-limited after "
                                f"{MAX_RETRIES} retries: {e}") from e
@@ -86,10 +151,30 @@ def chat(role: str, model: str, messages: list, tools: list | None = None,
             time.sleep(min(30, 2 ** attempt))
         except APIStatusError as e:
             body = str(getattr(e, "body", "")) + str(e)
-            # Malformed tool call from the model: sampling again often works.
-            if e.status_code == 400 and "tool_use_failed" in body \
-                    and attempt <= 2:
-                log(f"{role}: tool_use_failed, resampling")
+            if e.status_code == 413:
+                raise RequestTooLarge(f"{role}: HTTP 413: {body[:300]}") \
+                    from e
+            # The model wrote something Groq could not parse into a message
+            # or tool call (e.g. gpt-oss emitting its reasoning as the
+            # answer; seen in run 44938351640). Sampling again usually
+            # works; after two failures, also drop the reasoning setting.
+            if e.status_code == 400 and ("tool_use_failed" in body or
+                                         "output_parse_failed" in body):
+                parse_failures += 1
+                if parse_failures > 4:
+                    raise LLMError(f"{role}: model output unparseable "
+                                   f"{parse_failures} times: {body[:400]}") \
+                        from e
+                if parse_failures >= 2 and model not in _NO_REASONING_PARAM:
+                    log(f"{role}: dropping reasoning params for {model}")
+                    _NO_REASONING_PARAM.add(model)
+                log(f"{role}: unparseable output ({parse_failures}), "
+                    "resampling")
+                continue
+            if e.status_code == 400 and "reasoning_effort" in body and \
+                    model not in _NO_REASONING_PARAM:
+                log(f"{role}: {model} rejects reasoning params; dropping")
+                _NO_REASONING_PARAM.add(model)
                 continue
             if e.status_code >= 500 and attempt <= MAX_RETRIES:
                 time.sleep(min(30, 2 ** attempt))
@@ -98,6 +183,9 @@ def chat(role: str, model: str, messages: list, tools: list | None = None,
                 from e
 
     u = USAGE.setdefault(role, {"prompt": 0, "completion": 0, "calls": 0})
+    if model != requested:
+        u.setdefault("fallback_calls", {})
+        u["fallback_calls"][model] = u["fallback_calls"].get(model, 0) + 1
     if resp.usage:
         u["prompt"] += resp.usage.prompt_tokens or 0
         u["completion"] += resp.usage.completion_tokens or 0
