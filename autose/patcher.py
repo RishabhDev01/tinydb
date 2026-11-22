@@ -73,6 +73,18 @@ def _outline(lines: list, cls: ast.ClassDef) -> str:
     return "\n".join(out)
 
 
+def _module_outline(lines: list, tree: ast.Module) -> str:
+    """Imports plus one line per top-level definition."""
+    out = []
+    for node in tree.body:
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            out.extend(lines[node.lineno - 1:node.end_lineno])
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                               ast.ClassDef)):
+            out.append(lines[_start(node) - 1].rstrip() + "  ...")
+    return "\n".join(out)
+
+
 def _callees(node, cls_name: str | None, defs: dict) -> list:
     names = []
     for n in ast.walk(node):
@@ -133,6 +145,17 @@ def localize(root: Path, rows: list, max_chars: int = 9000) -> list:
                            "kind": "class outline",
                            "code": _outline(lines, defs[owner])})
             have.add((path, owner))
+        # ADR-025: a new module-level function (run 25: `append` in
+        # operations.py) had nothing to show, so the run stopped. Show the
+        # module it goes into: in full if small (its sibling functions are
+        # the best style guide), else an outline.
+        elif not owner and name and (path, "MODULE") not in have:
+            blocks.append({"path": path, "name": "MODULE",
+                           "kind": "module it goes into; add with "
+                                   f"### ADD {path} MODULE",
+                           "code": text.rstrip() if len(text) <= 6000
+                           else _module_outline(lines, ast.parse(text))})
+            have.add((path, "MODULE"))
     # ADR-024: helpers get their own share of the budget. In run 22 the
     # three large definitions used it all, so `_read_table` (whose
     # docstring says its doc IDs are still `str`) was never shown.
