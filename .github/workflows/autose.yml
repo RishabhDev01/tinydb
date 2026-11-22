@@ -39,7 +39,8 @@ env:
   GUARD_MODEL: ${{ vars.GUARD_MODEL || 'meta-llama/llama-prompt-guard-2-86m' }}
   # Token budgets per agent per run (ADR-009, ADR-022).
   PLANNER_BUDGET: ${{ vars.PLANNER_BUDGET || '400000' }}
-  BUILDER_BUDGET: ${{ vars.BUILDER_BUDGET || '120000' }}
+  BUILDER_BUDGET: ${{ vars.BUILDER_BUDGET || '200000' }}
+  BUILDER_MAX_TOKENS: ${{ vars.BUILDER_MAX_TOKENS || '12000' }}
   REVIEWER_BUDGET: ${{ vars.REVIEWER_BUDGET || '250000' }}
   PYTHONUNBUFFERED: "1"
 
