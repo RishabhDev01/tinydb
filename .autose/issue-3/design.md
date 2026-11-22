@@ -19,3 +19,9 @@ Modify `tinydb.table.Table._update_table` to perform the update inside a `try/ex
 ## Risks
 - The rollback writes the original tables back, which may trigger another write and clear the cache; this is acceptable as the operation is aborted.  Existing tests that rely on cache state after a failed update will need to be updated accordingly.
 - If the updater modifies the table in place before an exception, the snapshot must be a deep copy; we use `dict.copy()` which is shallow but sufficient because values are mappings that are not mutated outside the updater.
+
+## STOPPED at stage `design`
+
+QuotaExhausted: planner: Groq daily quota used up for openai/gpt-oss-120b and its fallbacks (retry after: openai/gpt-oss-120b ~18 min, openai/gpt-oss-20b ~4 min)
+
+The free-tier quota refills at about 8k tokens per hour per model. Comment `/autose` later to resume at this stage.

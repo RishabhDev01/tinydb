@@ -837,14 +837,7 @@ class Table:
         }
 
         # Perform the table update operation
-        try:
-            updater(table)
-        except Exception:
-            # Restore original table data on error
-            tables[self.name] = raw_table
-            self._storage.write(tables)
-            self.clear_cache()
-            raise
+        updater(table)
 
         # Convert the document IDs back to strings.
         # This is required as some storages (most notably the JSON file format)
