@@ -1,0 +1,125 @@
+diff --git a/tests/test_autose_issue_7.py b/tests/test_autose_issue_7.py
+new file mode 100644
+index 0000000..eddce8f
+--- /dev/null
++++ b/tests/test_autose_issue_7.py
+@@ -0,0 +1,62 @@
++import pytest
++from tinydb import TinyDB, where
++from tinydb.storages import MemoryStorage
++from tinydb.table import Document
++
++
++def test_search_mutation_does_not_affect_subsequent_search():
++    """AC-1: Modifying search result does not affect subsequent search."""
++    db = TinyDB(storage=MemoryStorage)
++    table = db.table('_default')
++    table.insert({'name': 'alice', 'role': 'admin'})
++
++    results1 = table.search(where('role') == 'admin')
++    results1[0]['name'] = 'bob'
++
++    results2 = table.search(where('role') == 'admin')
++    assert results2[0]['name'] == 'alice'
++
++
++def test_search_nested_mutation_does_not_affect_subsequent_search():
++    """AC-2: Modifying nested structures does not affect subsequent search."""
++    db = TinyDB(storage=MemoryStorage)
++    table = db.table('_default')
++    table.insert({'name': 'alice', 'details': {'city': 'London'}})
++
++    results1 = table.search(where('name') == 'alice')
++    results1[0]['details']['city'] = 'Paris'
++
++    results2 = table.search(where('name') == 'alice')
++    assert results2[0]['details']['city'] == 'London'
++
++
++def test_search_preserves_document_type_and_doc_id():
++    """AC-3: Uncached and repeated search preserves Document type and id."""
++    db = TinyDB(storage=MemoryStorage)
++    table = db.table('_default')
++    doc_id = table.insert({'name': 'alice'})
++    assert doc_id == 1
++
++    # First search (uncached)
++    results = table.search(where('name') == 'alice')
++    assert len(results) == 1
++    assert isinstance(results[0], Document)
++    assert results[0].doc_id == 1
++    assert results[0] == {'name': 'alice'}
++
++    # Second search (cached)
++    results_cached = table.search(where('name') == 'alice')
++    assert len(results_cached) == 1
++    assert isinstance(results_cached[0], Document)
++    assert results_cached[0].doc_id == 1
++    assert results_cached[0] == {'name': 'alice'}
++
++
++def test_search_with_no_matches():
++    """AC-4: Search with no matches returns empty list."""
++    db = TinyDB(storage=MemoryStorage)
++    table = db.table('_default')
++    table.insert({'name': 'alice'})
++
++    results = table.search(where('name') == 'bob')
++    assert results == []
+diff --git a/tinydb/table.py b/tinydb/table.py
+index 76470aa..6a028dc 100644
+--- a/tinydb/table.py
++++ b/tinydb/table.py
+@@ -250,27 +250,26 @@ class Table:
+         """
+         Search for all documents matching a 'where' cond.
+ 
+-        Note: a repeated search with the same ``cond`` is served from an
+-        internal cache. The returned list is a fresh copy, but its
+-        documents are the same objects held by the cache -- treat them as
+-        read-only, since mutating one (a key or a nested value) corrupts
+-        what a later identical search returns.
+-
+         :param cond: the condition to check against
+         :returns: list of matching documents
+         """
++        import copy
+ 
+         # First, we check the query cache to see if it has results for this
+         # query
+         cached_results = self._query_cache.get(cond)
+         if cached_results is not None:
+-            return cached_results[:]
++            return [
++                self.document_class(copy.deepcopy(doc), doc.doc_id)
++                for doc in cached_results
++            ]
+ 
+         # Perform the search by applying the query to all documents.
+         # Then, only if the document matches the query, convert it
+         # to the document class and document ID class.
+         docs = [
+-            self.document_class(doc, self.document_id_class(doc_id))
++            self.document_class(copy.deepcopy(doc),
++                                self.document_id_class(doc_id))
+             for doc_id, doc in self._read_table().items()
+             if cond(doc)
+         ]
+@@ -288,11 +287,14 @@ class Table:
+         # This is to keep consistency with TinyDB's behavior before
+         # `is_cacheable` was introduced which assumed that all queries
+         # are cacheable.
+-        is_cacheable: Callable[[], bool] = getattr(cond, 'is_cacheable',
+-                                                   lambda: True)
++        is_cacheable = getattr(cond, 'is_cacheable', lambda: True)
+         if is_cacheable():
+-            # Update the query cache
+-            self._query_cache[cond] = docs[:]
++            # Update the query cache with copies so the cache cannot be
++            # mutated by modifications to docs returned to caller
++            self._query_cache[cond] = [
++                self.document_class(copy.deepcopy(doc), doc.doc_id)
++                for doc in docs
++            ]
+ 
+         return docs
