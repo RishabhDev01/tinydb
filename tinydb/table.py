@@ -366,7 +366,10 @@ class Table:
                 return None
 
             # Convert the raw data to the document class
-            return self.document_class(raw_doc, doc_id)
+            return self.document_class(
+                raw_doc,
+                self.document_id_class(doc_id)
+            )
 
         elif doc_ids is not None:
             # Filter the table by extracting out all those documents which
@@ -462,18 +465,17 @@ class Table:
             # (see issue #591). The list of *actually* updated IDs is
             # determined inside the updater so it reflects the table state at
             # write time.
-            requested_ids = list(doc_ids)
+            requested_ids = [str(d) for d in doc_ids]
             updated_ids: list[int] = []
 
             def updater(table: dict):
                 # Filter to IDs that exist *before* performing any updates,
                 # so the operation is atomic: either every existing target is
                 # updated, or none is.
-                updated_ids.extend(
-                    doc_id for doc_id in requested_ids if doc_id in table
-                )
-                for doc_id in updated_ids:
-                    perform_update(table, doc_id)
+                for str_id in requested_ids:
+                    if str_id in table:
+                        updated_ids.append(self.document_id_class(str_id))
+                        perform_update(table, str_id)
 
             # Perform the update operation (see _update_table for details)
             self._update_table(updater)
@@ -499,7 +501,7 @@ class Table:
                     # query. Call the processing callback with the document ID
                     if _cond(table[doc_id]):
                         # Add ID to list of updated documents
-                        updated_ids.append(doc_id)
+                        updated_ids.append(self.document_id_class(doc_id))
 
                         # Perform the update (see above)
                         perform_update(table, doc_id)
@@ -518,7 +520,7 @@ class Table:
                 # Process all documents
                 for doc_id in list(table.keys()):
                     # Add ID to list of updated documents
-                    updated_ids.append(doc_id)
+                    updated_ids.append(self.document_id_class(doc_id))
 
                     # Perform the update (see above)
                     perform_update(table, doc_id)
@@ -645,18 +647,17 @@ class Table:
             # ``get(doc_ids=...)`` (see issue #591). The list of *actually*
             # removed IDs is determined inside the updater so it reflects the
             # table state at write time.
-            requested_ids = list(doc_ids)
+            requested_ids = [str(d) for d in doc_ids]
             removed_ids: list[int] = []
 
             def updater(table: dict):
                 # Filter to IDs that exist *before* performing any removals,
                 # so the operation is atomic: either every existing target is
                 # removed, or none is.
-                removed_ids.extend(
-                    doc_id for doc_id in requested_ids if doc_id in table
-                )
-                for doc_id in removed_ids:
-                    del table[doc_id]
+                for str_id in requested_ids:
+                    if str_id in table:
+                        removed_ids.append(self.document_id_class(str_id))
+                        del table[str_id]
 
             # Perform the remove operation
             self._update_table(updater)
@@ -683,7 +684,7 @@ class Table:
                 for doc_id in list(table.keys()):
                     if _cond(table[doc_id]):
                         # Add document ID to list of removed document IDs
-                        removed_ids.append(doc_id)
+                        removed_ids.append(self.document_id_class(doc_id))
 
                         # Remove document from the table
                         table.pop(doc_id)
