@@ -1,8 +1,8 @@
 diff --git a/tinydb/operations.py b/tinydb/operations.py
-index 3f6c6ab..3edaeb1 100644
+index 3f6c6ab..1b507e6 100644
 --- a/tinydb/operations.py
 +++ b/tinydb/operations.py
-@@ -73,3 +73,18 @@ def decrement(field: str) -> Callable[[MutableMapping], None]:
+@@ -73,3 +73,17 @@ def decrement(field: str) -> Callable[[MutableMapping], None]:
          doc[field] -= 1
  
      return transform
@@ -10,20 +10,19 @@ index 3f6c6ab..3edaeb1 100644
 +
 +def append(field: str, val: Any) -> Callable[[MutableMapping], None]:
 +    """
-+    Append ``val`` to a given list field in the document.
-+
-+    If the field does not exist, it is initialized as a list containing ``val``.
++    Append ``val`` to a list field, creating it as a single-element list
++    if it does not exist.
 +    """
 +    def transform(doc: MutableMapping):
-+        if field not in doc:
-+            doc[field] = [val]
-+        else:
++        if field in doc:
 +            doc[field].append(val)
++        else:
++            doc[field] = [val]
 +
 +    return transform
 diff --git a/tests/test_autose_issue_6.py b/tests/test_autose_issue_6.py
 new file mode 100644
-index 0000000..fdacf82
+index 0000000..9c2b52b
 --- /dev/null
 +++ b/tests/test_autose_issue_6.py
 @@ -0,0 +1,43 @@
@@ -40,30 +39,30 @@ index 0000000..fdacf82
 +
 +    db.update(append('tags', 'review'), where('id') == 1)
 +
-+    assert db.get(where('id') == 1) == {'id': 1, 'tags': ['urgent', 'review']}
++    assert db.get(where('id') == 1) == {'tags': ['urgent', 'review'], 'id': 1}
 +
 +
-+def test_append_nonexistent_field():
-+    """AC-2: Append to non-existent field initializes list."""
++def test_append_field_not_exists():
++    """AC-2: Append when field does not exist."""
 +    db = TinyDB(storage=MemoryStorage)
 +    db.insert({'id': 2})
 +
 +    db.update(append('tags', 'urgent'), where('id') == 2)
 +
-+    assert db.get(where('id') == 2) == {'id': 2, 'tags': ['urgent']}
++    assert db.get(where('id') == 2) == {'tags': ['urgent'], 'id': 2}
 +
 +
 +def test_append_non_list_raises_attribute_error():
-+    """AC-3: Append to field with non-list value raises AttributeError."""
++    """AC-3: Append to non-list existing field raises AttributeError."""
 +    db = TinyDB(storage=MemoryStorage)
-+    db.insert({'id': 3, 'tags': 'urgent'})
++    db.insert({'id': 3, 'tags': 42})
 +
 +    with pytest.raises(AttributeError):
-+        db.update(append('tags', 'review'), where('id') == 3)
++        db.update(append('tags', 'urgent'), where('id') == 3)
 +
 +
-+def test_existing_operations_unchanged():
-+    """AC-4: Existing operations remain unchanged."""
++def test_existing_update_operations_unchanged():
++    """AC-4: Existing update operations unchanged."""
 +    db = TinyDB(storage=MemoryStorage)
 +    db.insert({'id': 4, 'count': 1})
 +

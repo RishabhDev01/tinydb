@@ -2,7 +2,7 @@
 
 Closes #6
 
-**Summary:** Add an `append` operation to `tinydb.operations` that appends a value to an existing list field or initializes a new single-element list if the field does not exist.
+**Summary:** Provide an `append(field, val)` operation function in `tinydb.operations` to append a value to a list field or initialise a single-item list if the field does not exist.
 
 | Artifact | |
 |---|---|
@@ -11,7 +11,7 @@ Closes #6
 | Patch (stage 3) | `.autose/issue-6/diff.patch` |
 | Test report (stage 4) | `.autose/issue-6/test_report.md` |
 | CI (stage 5) | pending: (pending) |
-| Run | https://github.com/RishabhDev01/tinydb/actions/runs/44993893882 |
+| Run | https://github.com/RishabhDev01/tinydb/actions/runs/45005712745 |
 
 ### Stage history
 | Round | Stage | Result |
@@ -20,6 +20,10 @@ Closes #6
 | r1 | spec | pass |
 | r1 | design | pass |
 | r1 | implement | STOPPED |
+| r1 | design | pass |
+| r1 | implement+test | pass |
+| r1 | guard | pass |
+| r1 | spec | pass |
 | r1 | design | pass |
 | r1 | implement+test | pass |
 

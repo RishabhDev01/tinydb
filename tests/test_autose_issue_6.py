@@ -11,30 +11,30 @@ def test_append_existing_list():
 
     db.update(append('tags', 'review'), where('id') == 1)
 
-    assert db.get(where('id') == 1) == {'id': 1, 'tags': ['urgent', 'review']}
+    assert db.get(where('id') == 1) == {'tags': ['urgent', 'review'], 'id': 1}
 
 
-def test_append_nonexistent_field():
-    """AC-2: Append to non-existent field initializes list."""
+def test_append_field_not_exists():
+    """AC-2: Append when field does not exist."""
     db = TinyDB(storage=MemoryStorage)
     db.insert({'id': 2})
 
     db.update(append('tags', 'urgent'), where('id') == 2)
 
-    assert db.get(where('id') == 2) == {'id': 2, 'tags': ['urgent']}
+    assert db.get(where('id') == 2) == {'tags': ['urgent'], 'id': 2}
 
 
 def test_append_non_list_raises_attribute_error():
-    """AC-3: Append to field with non-list value raises AttributeError."""
+    """AC-3: Append to non-list existing field raises AttributeError."""
     db = TinyDB(storage=MemoryStorage)
-    db.insert({'id': 3, 'tags': 'urgent'})
+    db.insert({'id': 3, 'tags': 42})
 
     with pytest.raises(AttributeError):
-        db.update(append('tags', 'review'), where('id') == 3)
+        db.update(append('tags', 'urgent'), where('id') == 3)
 
 
-def test_existing_operations_unchanged():
-    """AC-4: Existing operations remain unchanged."""
+def test_existing_update_operations_unchanged():
+    """AC-4: Existing update operations unchanged."""
     db = TinyDB(storage=MemoryStorage)
     db.insert({'id': 4, 'count': 1})
 

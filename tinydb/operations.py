@@ -77,14 +77,13 @@ def decrement(field: str) -> Callable[[MutableMapping], None]:
 
 def append(field: str, val: Any) -> Callable[[MutableMapping], None]:
     """
-    Append ``val`` to a given list field in the document.
-
-    If the field does not exist, it is initialized as a list containing ``val``.
+    Append ``val`` to a list field, creating it as a single-element list
+    if it does not exist.
     """
     def transform(doc: MutableMapping):
-        if field not in doc:
-            doc[field] = [val]
-        else:
+        if field in doc:
             doc[field].append(val)
+        else:
+            doc[field] = [val]
 
     return transform

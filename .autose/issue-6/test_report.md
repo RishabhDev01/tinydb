@@ -9,9 +9,9 @@
 | AC | Tests |
 |---|---|
 | AC-1 | tests/test_autose_issue_6.py::test_append_existing_list |
-| AC-2 | tests/test_autose_issue_6.py::test_append_nonexistent_field |
+| AC-2 | tests/test_autose_issue_6.py::test_append_field_not_exists |
 | AC-3 | tests/test_autose_issue_6.py::test_append_non_list_raises_attribute_error |
-| AC-4 | tests/test_autose_issue_6.py::test_existing_operations_unchanged |
+| AC-4 | tests/test_autose_issue_6.py::test_existing_update_operations_unchanged |
 
 ## Attempts
 
@@ -26,7 +26,7 @@
 
 ## Builder's summary (unverified claim)
 
-Added the `append` helper function to `tinydb.operations`. It updates documents by either appending `val` to an existing list field or initializing a single-item list if the field does not exist, raising an `AttributeError` if the existing value is not a list. Added unit tests for each acceptance criterion in `tests/test_autose_issue_6.py`.
+Added the `append` operation to `tinydb.operations`. It appends a value to an existing list field or initializes the field as a single-element list if it does not exist, raising an `AttributeError` if the existing field value lacks an `append` method.
 
 ## pytest output (tail)
 
