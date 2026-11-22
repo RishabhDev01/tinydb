@@ -88,11 +88,16 @@ def run_agent(*, role: str, model: str, messages: list, tools: list,
         calls = msg.tool_calls or []
         entry = {"role": "assistant", "content": strip_think(msg.content)}
         if calls:
-            entry["tool_calls"] = [
-                {"id": c.id, "type": "function",
-                 "function": {"name": c.function.name,
-                              "arguments": c.function.arguments or "{}"}}
-                for c in calls]
+            # Echo each call back with every field the provider sent, not
+            # only id/name/arguments: Gemini attaches reasoning state
+            # ("thought signatures") to tool calls (ADR-019).
+            entry["tool_calls"] = []
+            for c in calls:
+                d = c.model_dump(exclude_none=True)
+                d["type"] = "function"
+                d["function"] = {"name": c.function.name,
+                                 "arguments": c.function.arguments or "{}"}
+                entry["tool_calls"].append(d)
         messages.append(entry)
 
         if not calls:

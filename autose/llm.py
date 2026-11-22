@@ -20,7 +20,6 @@ MAX_RETRIES = int(os.environ.get("AUTOSE_MAX_RETRIES", "10"))
 # role -> {"prompt": int, "completion": int, "calls": int}
 USAGE: dict = {}
 
-_client = None
 
 
 class LLMError(Exception):
@@ -46,9 +45,11 @@ class QuotaExhausted(LLMError):
 # min per call until the job timed out). Then we switch to a fallback model
 # with its own quota, or stop at once with a clear reason.
 LONG_WAIT_S = float(os.environ.get("AUTOSE_LONG_WAIT_S", "90"))
+# ADR-019: Gemini (paid) first, then Groq's free gpt-oss models.
+_DEFAULT_FALLBACK = ("gemini-3.8-flash>openai/gpt-oss-120b,"
+                     "openai/gpt-oss-120b>openai/gpt-oss-20b")
 FALLBACK = dict(pair.split(">", 1) for pair in os.environ.get(
-    "AUTOSE_FALLBACK", "openai/gpt-oss-120b>openai/gpt-oss-20b").split(",")
-    if ">" in pair)
+    "AUTOSE_FALLBACK", _DEFAULT_FALLBACK).split(",") if ">" in pair)
 _EXHAUSTED: dict = {}  # model -> seconds Groq asked us to wait
 
 
@@ -69,6 +70,7 @@ def _route(model: str) -> str | None:
 # towards max_tokens and TPM, so keep them low (ADR-013). If a model rejects
 # the parameter, we drop it and remember that.
 REASONING = {"openai/gpt-oss": {"reasoning_effort": "low"},
+             "gemini-": {"reasoning_effort": "low"},
              "qwen/": {"reasoning_effort": "none"}}
 _NO_REASONING_PARAM: set = set()
 
@@ -77,13 +79,28 @@ def log(msg: str) -> None:
     print(f"[autose] {msg}", file=sys.stderr, flush=True)
 
 
-def _get_client() -> OpenAI:
-    global _client
-    if _client is None:
-        _client = OpenAI(base_url=GROQ_BASE_URL,
-                         api_key=os.environ["GROQ_API_KEY"],
-                         timeout=180, max_retries=0)
-    return _client
+# ADR-019: two OpenAI-compatible providers. A model name says which one:
+# "gemini-..." goes to Google (paid Tier 1), everything else to Groq.
+PROVIDERS = {
+    "groq": (GROQ_BASE_URL, "GROQ_API_KEY"),
+    "gemini": ("https://generativelanguage.googleapis.com/v1beta/openai/",
+               "GEMINI_API_KEY"),
+}
+_clients: dict = {}
+
+
+def provider(model: str) -> str:
+    return "gemini" if model.startswith("gemini") else "groq"
+
+
+def _get_client(model: str = "") -> OpenAI:
+    name = provider(model)
+    if name not in _clients:
+        base_url, key_env = PROVIDERS[name]
+        _clients[name] = OpenAI(base_url=base_url,
+                                api_key=os.environ[key_env],
+                                timeout=180, max_retries=0)
+    return _clients[name]
 
 
 def _retry_after(err) -> float | None:
@@ -126,7 +143,7 @@ def chat(role: str, model: str, messages: list, tools: list | None = None,
                           if model.startswith(k)), None)
             if extra and model not in _NO_REASONING_PARAM:
                 kwargs["extra_body"] = extra
-            resp = _get_client().chat.completions.create(**kwargs)
+            resp = _get_client(model).chat.completions.create(**kwargs)
             break
         except RateLimitError as e:
             wait = _retry_after(e) or min(60, 2 ** attempt) + random.random()

@@ -32,8 +32,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  PLANNER_MODEL: ${{ vars.PLANNER_MODEL || 'openai/gpt-oss-120b' }}
-  BUILDER_MODEL: ${{ vars.BUILDER_MODEL || 'openai/gpt-oss-120b' }}
+  PLANNER_MODEL: ${{ vars.PLANNER_MODEL || 'gemini-3.8-flash' }}
+  BUILDER_MODEL: ${{ vars.BUILDER_MODEL || 'gemini-3.8-flash' }}
   JUDGE_MODEL: ${{ vars.JUDGE_MODEL || 'qwen/qwen3.8-27b' }}
   REVIEWER_MODEL: ${{ vars.REVIEWER_MODEL || 'qwen/qwen3.8-27b' }}
   GUARD_MODEL: ${{ vars.GUARD_MODEL || 'meta-llama/llama-prompt-guard-2-86m' }}
@@ -95,6 +95,8 @@ jobs:
       - id: o
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          # Planner and builder only (ADR-019); the review job never gets it.
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GH_TOKEN: ${{ github.token }}
         run: >-
           python -m autose.orchestrator
