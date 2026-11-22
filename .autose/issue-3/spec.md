@@ -35,3 +35,7 @@ All update operations must be atomic: either all matching documents are updated,
 
 ## API touched
 - `tinydb.table.Table.update` (existing)
+
+## STOPPED at stage `spec`
+
+AgentStopped: planner: reached max_turns=20 without calling finish
