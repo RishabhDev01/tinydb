@@ -12,6 +12,17 @@ from .tools import ToolError, clip
 NUDGE = ("Continue. Use the tools to work, and call the `finish` tool "
          "when you are done. Do not reply with plain text only.")
 
+# ADR-020: run 16's Gemini planner read code for 20 turns and never called
+# finish. The budget is stated up front, and the last turns offer only
+# `finish`, so a stage ends with an answer for the checks to judge.
+WRAP_UP_TURNS = 3
+BUDGET_NOTE = ("\n\nTurn budget: you have {n} turns (one tool call batch "
+               "each). Read only what you need, and call `finish` well "
+               "before the budget runs out.")
+WRAP_UP = ("Turn {t} of {n}: your turn budget is almost used up. Stop "
+           "exploring. Call `finish` now with your complete answer, based "
+           "on what you have already read. `finish` is the only tool left.")
+
 
 class AgentStopped(Exception):
     pass
@@ -69,13 +80,24 @@ def run_agent(*, role: str, model: str, messages: list, tools: list,
         "description": "Call exactly once when your work is complete.",
         "parameters": finish_schema}}
     all_tools = tools + [finish_tool]
+    if messages and messages[0].get("role") == "system" and \
+            "Turn budget:" not in messages[0]["content"]:
+        messages[0]["content"] += BUDGET_NOTE.format(n=max_turns)
     nudges = 0
+    wrap_from = max(1, max_turns - WRAP_UP_TURNS + 1)
     for turn in range(1, max_turns + 1):
+        offered = all_tools
+        if turn >= wrap_from:
+            offered = [finish_tool]
+            if turn == wrap_from:
+                log(f"{role}: turn {turn}/{max_turns}, only finish offered")
+                messages.append({"role": "user", "content":
+                                 WRAP_UP.format(t=turn, n=max_turns)})
         _compact(messages, max_chars)
         limit, keep = max_chars, 6
         for shrink in range(4):
             try:
-                msg = chat(role, model, messages, tools=all_tools,
+                msg = chat(role, model, messages, tools=offered,
                            budget=budget, max_tokens=max_tokens)
                 break
             except RequestTooLarge:
