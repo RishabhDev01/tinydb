@@ -1,0 +1,119 @@
+{
+  "issue": 5,
+  "round": 1,
+  "branch": "autose/issue-5",
+  "run": "https://github.com/RishabhDev01/tinydb/actions/runs/44993182187",
+  "models": {
+    "planner": "gemini-3.8-flash",
+    "builder": "gemini-3.8-flash",
+    "judge": "qwen/qwen3.8-27b",
+    "guard": "meta-llama/llama-prompt-guard-2-86m"
+  },
+  "attempts": {
+    "r1": 2
+  },
+  "design_reentries": 0,
+  "status": "running",
+  "history": [
+    {
+      "t": "2026-11-22T06:19:40Z",
+      "round": 1,
+      "stage": "setup",
+      "result": "ok",
+      "detail": "start=guard base=0462790"
+    },
+    {
+      "t": "2026-11-22T06:19:43Z",
+      "round": 1,
+      "stage": "guard",
+      "result": "pass",
+      "detail": "max score 0.001"
+    },
+    {
+      "t": "2026-11-22T06:20:05Z",
+      "round": 1,
+      "stage": "spec",
+      "result": "fail",
+      "detail": "AC-5 not testable: The 'Then' clause contains a redundant, non-standard boolean list expression alongside the expected value, making the observable result ambiguous and not a single deterministic value."
+    },
+    {
+      "t": "2026-11-22T06:20:12Z",
+      "round": 1,
+      "stage": "spec",
+      "result": "pass",
+      "detail": "5 ACs, attempt 2"
+    },
+    {
+      "t": "2026-11-22T06:20:46Z",
+      "round": 1,
+      "stage": "design",
+      "result": "pass",
+      "detail": "2 rows, attempt 1"
+    },
+    {
+      "t": "2026-11-22T06:20:52Z",
+      "round": 1,
+      "stage": "implement+test",
+      "result": "fail",
+      "detail": "attempt 1: BUILD FAILED (stage 3 check):\nTraceback (most recent call last):\n  File \"<string>\", line 1, in <module>\n  File \"/home/runner/work/tinydb/tinydb/tinydb/__init__.py\", line 30, in <module>\n    from .database import TinyDB\n  File \"/home/runner/work/tinydb/tinydb/tinydb/database.py\", line 9, i"
+    },
+    {
+      "t": "2026-11-22T06:20:58Z",
+      "round": 1,
+      "stage": "implement+test",
+      "result": "pass",
+      "detail": "attempt 2"
+    }
+  ],
+  "tokens": {
+    "guard": {
+      "prompt": 186,
+      "completion": 0,
+      "calls": 1
+    },
+    "planner": {
+      "prompt": 87607,
+      "completion": 2704,
+      "calls": 22
+    },
+    "judge": {
+      "prompt": 1102,
+      "completion": 381,
+      "calls": 2
+    },
+    "builder": {
+      "prompt": 4950,
+      "completion": 1312,
+      "calls": 2
+    }
+  },
+  "updated": "2026-11-22T06:20:58Z",
+  "baseline_passed": 227,
+  "next": "release",
+  "guard": {
+    "max_score": 0.0005314619629643857,
+    "chunks": 1
+  },
+  "judge": {
+    "AC-1": {
+      "testable": true,
+      "reason": "Concrete input data, single method call, and exact expected list output."
+    },
+    "AC-2": {
+      "testable": true,
+      "reason": "Concrete input data with missing keys, single method call, and exact expected list output."
+    },
+    "AC-3": {
+      "testable": true,
+      "reason": "Concrete input data including None values, single method call, and exact expected list output."
+    },
+    "AC-4": {
+      "testable": true,
+      "reason": "Concrete input data, single method call with a missing key, and exact expected empty list output."
+    },
+    "AC-5": {
+      "testable": true,
+      "reason": "Concrete input data in a specific table, single method call, and exact expected list output."
+    }
+  }
+}
