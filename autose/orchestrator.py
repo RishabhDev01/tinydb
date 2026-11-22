@@ -216,6 +216,13 @@ class Run:
                 pass   # stopped only by the Groq quota: continue (ADR-016)
             elif self.state.get("status") in ("released", "stopped"):
                 start = "guard"   # a fresh trigger after a finished run
+            elif start == "release" and exists and self.released_before():
+                # ADR-029: state.json is committed before release (the PR
+                # head must stay the commit CI tested), so a finished run
+                # looks like "running, next=release" on the branch. With an
+                # open PR from this branch it had released: start fresh.
+                # Run 29 (label on issue #5) resumed at release instead.
+                start = "guard"
         if exists:
             self.sync_with_master(fresh=(start == "guard"))
         self.base = gh.run(["git", "merge-base", "origin/master", "HEAD"])
@@ -245,6 +252,16 @@ class Run:
                          f"at stage `{start}`. Follow it here: "
                          f"{gh.run_url()}")
         return start
+
+    def released_before(self) -> bool:
+        """True if an open PR from this issue branch exists (ADR-029)."""
+        try:
+            prs = gh.gh_json(["pr", "list", "--repo", gh.repo(), "--head",
+                              self.branch, "--state", "open", "--json",
+                              "number"])
+        except Exception:   # noqa: BLE001 - no gh/API: keep old behaviour
+            return False
+        return bool(prs)
 
     def sync_with_master(self, fresh: bool) -> None:
         """ADR-017: merge master into an existing issue branch, so the agents
