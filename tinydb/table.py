@@ -852,3 +852,16 @@ class Table:
 
         # Clear the query cache, as the table contents have changed
         self.clear_cache()
+
+    def pluck(self, key: str) -> list:
+        """
+        Extract the value of a specific field from all documents in the table.
+
+        Documents that do not contain the specified field are skipped.
+        Documents containing the field with a value of ``None`` are included.
+
+        :param key: The key of the field to extract.
+        :returns: A list of values extracted from documents containing the key.
+        """
+        values = self._read_table().values()
+        return [doc[key] for doc in values if key in doc]
