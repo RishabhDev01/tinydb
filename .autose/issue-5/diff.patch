@@ -1,77 +1,78 @@
 diff --git a/tinydb/table.py b/tinydb/table.py
-index 76470aa..2f9acb9 100644
+index 76470aa..c104a1e 100644
 --- a/tinydb/table.py
 +++ b/tinydb/table.py
-@@ -852,3 +852,15 @@ class Table:
+@@ -852,3 +852,16 @@ class Table:
  
          # Clear the query cache, as the table contents have changed
          self.clear_cache()
 +
-+    def pluck(self, field: str) -> list:
++    def pluck(self, key: str) -> list:
 +        """
-+        Extract the value of a given field from all documents in the table.
++        Extract the value of a specific field from all documents in the table.
 +
-+        Documents that do not contain the field are skipped.
++        Documents that do not contain the specified field are skipped.
++        Documents containing the field with a value of ``None`` are included.
 +
-+        :param field: The field name to pluck.
-+        :returns: A list of plucked field values.
++        :param key: The key of the field to extract.
++        :returns: A list of values extracted from documents containing the key.
 +        """
 +        values = self._read_table().values()
-+        return [doc[field] for doc in values if field in doc]
++        return [doc[key] for doc in values if key in doc]
 diff --git a/tests/test_autose_issue_5.py b/tests/test_autose_issue_5.py
 new file mode 100644
-index 0000000..0eb7dd0
+index 0000000..97e2287
 --- /dev/null
 +++ b/tests/test_autose_issue_5.py
 @@ -0,0 +1,51 @@
-+"""Tests for the Table.pluck method."""
-+
++"""Tests for Table.pluck functionality."""
 +from tinydb import TinyDB
 +from tinydb.storages import MemoryStorage
 +
 +
-+def test_pluck_all_present():
-+    """AC-1: Pluck field from documents with all fields present."""
++def test_pluck_all_matching_keys():
++    """AC-1: Pluck field from documents with all matching keys."""
 +    db = TinyDB(storage=MemoryStorage)
-+    db.insert({'name': 'alice'})
-+    db.insert({'name': 'bob'})
++    table = db.table('test')
++    table.insert({'name': 'Alice', 'age': 30})
++    table.insert({'name': 'Bob', 'age': 25})
 +
-+    assert db.pluck('name') == ['alice', 'bob']
++    assert table.pluck('name') == ['Alice', 'Bob']
 +
 +
-+def test_pluck_skipping_missing():
-+    """AC-2: Pluck field skipping documents missing the field."""
++def test_pluck_skip_missing_field():
++    """AC-2: Skip documents lacking the plucked field."""
 +    db = TinyDB(storage=MemoryStorage)
-+    db.insert({'name': 'alice', 'age': 30})
-+    db.insert({'age': 25})
-+    db.insert({'name': 'charlie'})
++    table = db.table('test')
++    table.insert({'name': 'Alice', 'score': 100})
++    table.insert({'score': 85})
++    table.insert({'name': 'Charlie', 'score': 90})
 +
-+    assert db.pluck('name') == ['alice', 'charlie']
++    assert table.pluck('name') == ['Alice', 'Charlie']
 +
 +
-+def test_pluck_preserves_none():
-+    """AC-3: Pluck preserves None values when key is present."""
++def test_pluck_none_vs_absent():
++    """AC-3: Pluck when field value is None vs absent."""
 +    db = TinyDB(storage=MemoryStorage)
-+    db.insert({'val': None})
-+    db.insert({'val': 42})
++    table = db.table('test')
++    table.insert({'name': 'Alice', 'alias': None})
++    table.insert({'name': 'Bob'})
 +
-+    assert db.pluck('val') == [None, 42]
++    assert table.pluck('alias') == [None]
 +
 +
-+def test_pluck_non_existent():
-+    """AC-4: Pluck non-existent field."""
++def test_pluck_empty_table():
++    """AC-4: Pluck from an empty table."""
 +    db = TinyDB(storage=MemoryStorage)
-+    db.insert({'name': 'alice'})
-+    db.insert({'name': 'bob'})
++    table = db.table('test')
 +
-+    assert db.pluck('missing') == []
++    assert table.pluck('name') == []
 +
 +
-+def test_pluck_custom_table():
-+    """AC-5: Pluck on a custom table."""
++def test_pluck_default_table():
++    """AC-5: Pluck via default table on TinyDB instance."""
 +    db = TinyDB(storage=MemoryStorage)
-+    users = db.table('users')
-+    users.insert({'email': 'alice@example.com'})
-+    users.insert({'email': 'bob@example.com'})
++    db.insert({'city': 'Paris'})
++    db.insert({'city': 'London'})
 +
-+    assert users.pluck('email') == ['alice@example.com', 'bob@example.com']
++    assert db.pluck('city') == ['Paris', 'London']

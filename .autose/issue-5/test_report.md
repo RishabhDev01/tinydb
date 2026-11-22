@@ -8,11 +8,11 @@
 
 | AC | Tests |
 |---|---|
-| AC-1 | tests/test_autose_issue_5.py::test_pluck_all_present |
-| AC-2 | tests/test_autose_issue_5.py::test_pluck_skipping_missing |
-| AC-3 | tests/test_autose_issue_5.py::test_pluck_preserves_none |
-| AC-4 | tests/test_autose_issue_5.py::test_pluck_non_existent |
-| AC-5 | tests/test_autose_issue_5.py::test_pluck_custom_table |
+| AC-1 | tests/test_autose_issue_5.py::test_pluck_all_matching_keys |
+| AC-2 | tests/test_autose_issue_5.py::test_pluck_skip_missing_field |
+| AC-3 | tests/test_autose_issue_5.py::test_pluck_none_vs_absent |
+| AC-4 | tests/test_autose_issue_5.py::test_pluck_empty_table |
+| AC-5 | tests/test_autose_issue_5.py::test_pluck_default_table |
 
 ## Attempts
 
@@ -28,7 +28,7 @@
 
 ## Builder's summary (unverified claim)
 
-Removed the unimported `Any` type annotation from `Table.pluck`'s return type hint, using `list` instead. This resolves the `NameError: name 'Any' is not defined` on import.
+Changed the return type annotation of `Table.pluck` from `list[Any]` to `list` because `Any` was not imported in `tinydb/table.py`, which caused a `NameError` on import. Retained all test cases for AC-1 through AC-5.
 
 ## pytest output (tail)
 
@@ -37,6 +37,6 @@ Removed the unimported `Any` type annotation from `Table.pluck`'s return type hi
 .s...................................................................... [ 61%]
 ........................................................................ [ 92%]
 .................                                                        [100%]
-232 passed, 1 skipped in 0.68s
+232 passed, 1 skipped in 0.69s
 
 ```
