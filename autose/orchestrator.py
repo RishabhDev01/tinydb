@@ -172,9 +172,12 @@ class Run:
         if exists:
             self.sync_with_master(fresh=(start == "guard"))
         self.base = gh.run(["git", "merge-base", "origin/master", "HEAD"])
-        if start == "guard" and self.state.get("history"):
+        if start in ("guard", "spec", "design") and                 self.state.get("history"):
             # A fresh start must not build on an earlier run's code (run 12
-            # left a half-written test file on the branch). --no-overlay
+            # left a half-written test file on the branch). A restart at
+            # spec or design also gets a clean tree and fresh counters, or
+            # an earlier run's used-up attempts stop the builder at once
+            # (ADR-023). The spec in .autose/ is kept. --no-overlay
             # also deletes tracked files that master does not have; plain
             # checkout only overwrites (found reproducing run 13).
             for d in ("tinydb", "tests", "docs"):
