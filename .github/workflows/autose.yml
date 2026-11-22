@@ -22,11 +22,17 @@ on:
         default: auto
         type: choice
         options: [auto, guard, spec, design, implement, release]
+  # ADR-018: resume issues paused on the Groq daily quota. Only issues a
+  # maintainer already started can be paused, so this never starts new work.
+  schedule:
+    - cron: "17 */3 * * *"
 
 # Nothing by default; each job asks for what it needs (ADR-005, ADR-008).
 permissions: {}
 
 # One run per issue at a time; a second trigger queues (ADR-010).
+# Scheduled resumes share one group, and the gate skips them while another
+# AutoSE run is in progress (ADR-018).
 concurrency:
   group: autose-issue-${{ github.event.issue.number || inputs.issue }}
   cancel-in-progress: false
@@ -44,14 +50,16 @@ jobs:
     # Cheap pre-filter; the real checks are in autose/gate.py.
     if: >-
       github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
       (github.event_name == 'issues' && github.event.label.name == 'autose') ||
       (github.event_name == 'issue_comment' &&
        startsWith(github.event.comment.body, '/autose'))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      contents: read
+      contents: read         # read paused issues' state.json (ADR-018)
       pull-requests: read
+      actions: read          # skip if another AutoSE run is in progress
     outputs:
       run: ${{ steps.g.outputs.run }}
       issue: ${{ steps.g.outputs.issue }}

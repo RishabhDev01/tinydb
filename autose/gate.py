@@ -55,7 +55,58 @@ def decide(event_name: str, ev: dict) -> dict:
         return {"run": "true", "issue": number, "round": 1, "start": "auto",
                 "reason": f"/autose by {c.get('user', {}).get('login')}"}
 
+    if event_name == "schedule":
+        return pick_paused()
+
     return no(f"unsupported event {event_name}")
+
+
+MIN_PAUSE_MIN = 60   # let the quota refill before trying again
+
+
+def paused_issues() -> list:
+    """[(paused_at, issue, round)] for autose/issue-N branches whose state
+    says they paused on the Groq quota (ADR-018). Only issues a maintainer
+    already started have such a branch, so no new work is ever begun."""
+    names = gh.run(["gh", "api", f"repos/{gh.repo()}/branches",
+                    "--paginate", "-q", ".[].name"]).split()
+    out = []
+    for name in names:
+        m = re.fullmatch(r"autose/issue-(\d+)", name)
+        if not m:
+            continue
+        n = int(m.group(1))
+        try:
+            st = json.loads(gh.run([
+                "gh", "api", "-H", "Accept: application/vnd.github.raw",
+                f"repos/{gh.repo()}/contents/.autose/issue-{n}/state.json"
+                f"?ref={name}"]))
+        except (RuntimeError, ValueError):
+            continue
+        if st.get("status") == "paused" or (
+                st.get("status") == "stopped" and st.get("resume_at")):
+            out.append((st.get("paused_at") or st.get("updated", ""), n,
+                        int(st.get("round") or 1)))
+    return sorted(out)
+
+
+def pick_paused(cutoff: str | None = None) -> dict:
+    from datetime import datetime, timedelta, timezone
+    no = lambda why: {"run": "false", "reason": why}  # noqa: E731
+    running = gh.run(["gh", "run", "list", "--repo", gh.repo(), "--workflow",
+                      "autose.yml", "--status", "in_progress", "--json",
+                      "databaseId", "-q", "length"], check=False)
+    if running.strip() not in ("", "0", "1"):   # 1 = this run itself
+        return no("another AutoSE run is in progress; it uses the quota")
+    cutoff = cutoff or (datetime.now(timezone.utc) -
+              timedelta(minutes=MIN_PAUSE_MIN)
+              ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    for paused_at, n, rnd in paused_issues():
+        if paused_at <= cutoff:
+            return {"run": "true", "issue": n, "round": rnd, "start": "auto",
+                    "reason": f"scheduled resume of issue #{n} (paused "
+                              f"{paused_at})"}
+    return no("no issue paused long enough to resume")
 
 
 def main() -> int:

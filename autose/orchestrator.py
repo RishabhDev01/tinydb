@@ -161,7 +161,7 @@ class Run:
         if start == "auto":
             start = self.state.get("next", "guard")
             if self.state.pop("resume_at", None):
-                pass   # stopped only by the Groq quota: continue (ADR-016)
+                pass   # paused by the Groq quota: continue (ADR-016/018)
             elif self.state.get("status") in ("released", "stopped"):
                 start = "guard"   # a fresh trigger after a finished run
         if exists:
@@ -708,13 +708,32 @@ The `.autose/` folder holds the audit trail and can be deleted before merging.
             reason = e.reason if isinstance(e, Stop) else \
                 f"{type(e).__name__}: {e}"
             if isinstance(e, QuotaExhausted):
-                # Nothing failed a check: the next trigger resumes here
-                # instead of paying for spec and design again (ADR-016).
-                self.state["resume_at"] = st
-                reason += ("\n\nThe free-tier quota refills at about 8k "
-                           "tokens per hour per model. Comment `/autose` "
-                           "later to resume at this stage.")
+                return self.pause(st, reason)
             return self.stop(st, reason)
+
+    def pause(self, stage: str, reason: str) -> int:
+        """ADR-018: the Groq quota ran out. Nothing failed a check, so this
+        is a pause, not a failure: the job ends green, and the next trigger
+        (a scheduled tick or `/autose`) resumes at this stage instead of
+        paying for the earlier stages again (ADR-016)."""
+        self.state.update(status="paused", resume_at=stage, paused_at=now(),
+                          stop_reason=reason[:1000])
+        self.event(stage, "PAUSED", reason)
+        try:
+            self.commit_and_push(f"AutoSE: paused at {stage} for #{self.n} "
+                                 "(Groq quota)")
+        except RuntimeError as e:
+            log(f"push after pause failed: {e}")
+        gh.comment_issue(self.n, f"**AutoSE paused** at stage `{stage}` "
+                         f"(round {self.round}): the Groq free-tier daily "
+                         f"quota is used up.\n\n> {reason[:600]}\n\n"
+                         "Nothing failed. The quota refills at about 8k "
+                         "tokens per hour per model. A scheduled run "
+                         "resumes paused issues every 3 hours; comment "
+                         "`/autose` to resume sooner. Run: "
+                         f"{gh.run_url()}")
+        gh.set_output(status="paused", issue=self.n, round=self.round)
+        return 0
 
     def stop(self, stage: str, reason: str) -> int:
         artifact = {"guard": "state.json", "spec": "spec.md",
