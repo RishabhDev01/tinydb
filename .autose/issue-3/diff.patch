@@ -1,0 +1,88 @@
+diff --git a/tinydb/table.py b/tinydb/table.py
+index 76470aa..2fd47c7 100644
+--- a/tinydb/table.py
++++ b/tinydb/table.py
+@@ -814,6 +814,7 @@ class Table:
+         As a further optimization, we don't convert the documents into the
+         document class, as the table data will *not* be returned to the user.
+         """
++        import copy
+ 
+         tables = self._storage.read()
+ 
+@@ -827,12 +828,13 @@ class Table:
+             # The table does not exist yet, so it is empty
+             raw_table = {}
+ 
+-        # Convert the document IDs to the document ID class.
++        # Convert the document IDs to the document ID class and copy documents
++        # so mutations during updater don't modify storage if an error occurs.
+         # This is required as the rest of TinyDB expects the document IDs
+         # to be an instance of ``self.document_id_class`` but the storage
+         # might convert dict keys to strings.
+         table = {
+-            self.document_id_class(doc_id): doc
++            self.document_id_class(doc_id): copy.deepcopy(doc)
+             for doc_id, doc in raw_table.items()
+         }
+diff --git a/tests/test_autose_issue_3.py b/tests/test_autose_issue_3.py
+new file mode 100644
+index 0000000..a8047bc
+--- /dev/null
++++ b/tests/test_autose_issue_3.py
+@@ -0,0 +1,55 @@
++import pytest
++from tinydb import Query, TinyDB
++from tinydb.operations import increment
++from tinydb.storages import MemoryStorage
++
++
++def test_update_error_leaves_documents_unchanged():
++    """AC-1: Update error with MemoryStorage leaves documents unchanged."""
++    db = TinyDB(storage=MemoryStorage)
++    db.insert({'count': 1})
++    db.insert({'other': 0})
++    db.insert({'count': 5})
++
++    with pytest.raises(KeyError):
++        db.update(increment('count'))
++
++    assert db.all() == [{'count': 1}, {'other': 0}, {'count': 5}]
++
++
++def test_update_error_conditional_query_leaves_documents_unchanged():
++    """AC-2: Update error with conditional query leaves documents unchanged."""
++    db = TinyDB(storage=MemoryStorage)
++    db.insert({'group': 'a', 'val': 10})
++    db.insert({'group': 'a', 'val': 'not_an_int'})
++
++    with pytest.raises(TypeError):
++        db.update(increment('val'), Query().group == 'a')
++
++    assert db.all() == [
++        {'group': 'a', 'val': 10},
++        {'group': 'a', 'val': 'not_an_int'},
++    ]
++
++
++def test_update_error_doc_ids_leaves_documents_unchanged():
++    """AC-3: Update error with doc_ids leaves documents unchanged."""
++    db = TinyDB(storage=MemoryStorage)
++    db.insert({'val': 10})
++    db.insert({'other': 20})
++
++    with pytest.raises(KeyError):
++        db.update(increment('val'), doc_ids=[1, 2])
++
++    assert db.get(doc_id=1) == {'val': 10}
++
++
++def test_successful_update_persists_modified_documents():
++    """AC-4: Successful update persists modified documents."""
++    db = TinyDB(storage=MemoryStorage)
++    db.insert({'count': 1})
++    db.insert({'count': 5})
++
++    db.update(increment('count'))
++
++    assert db.all() == [{'count': 2}, {'count': 6}]
