@@ -37,6 +37,10 @@ env:
   JUDGE_MODEL: ${{ vars.JUDGE_MODEL || 'qwen/qwen3.8-27b' }}
   REVIEWER_MODEL: ${{ vars.REVIEWER_MODEL || 'gemini-4-hydrogen' }}
   GUARD_MODEL: ${{ vars.GUARD_MODEL || 'meta-llama/llama-prompt-guard-2-86m' }}
+  # Token budgets per agent per run (ADR-009, ADR-022).
+  PLANNER_BUDGET: ${{ vars.PLANNER_BUDGET || '400000' }}
+  BUILDER_BUDGET: ${{ vars.BUILDER_BUDGET || '120000' }}
+  REVIEWER_BUDGET: ${{ vars.REVIEWER_BUDGET || '250000' }}
   PYTHONUNBUFFERED: "1"
 
 jobs:

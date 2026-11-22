@@ -36,7 +36,9 @@ MODELS = {
                             "meta-llama/llama-prompt-guard-2-86m"),
 }
 BUDGET = {  # tokens per agent per run (ADR-009)
-    "planner": int(os.environ.get("PLANNER_BUDGET", "150000")),
+    # ADR-022: spec + design share this. 150k was sized for Groq's 8k TPM;
+    # on Gemini run 17 used 126k and run 20 hit 153k in design (~$0.12).
+    "planner": int(os.environ.get("PLANNER_BUDGET", "400000")),
     "builder": int(os.environ.get("BUILDER_BUDGET", "120000")),
     "judge": 30000,
 }
