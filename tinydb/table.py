@@ -852,3 +852,14 @@ class Table:
 
         # Clear the query cache, as the table contents have changed
         self.clear_cache()
+
+    def pluck(self, field: str) -> list:
+        """
+        Get the value of ``field`` from every document, in insertion order.
+
+        Documents that do not have the field are skipped.
+
+        :param field: the name of the field
+        :returns: a list of the field's values
+        """
+        return [doc.get(field) for doc in self._read_table().values()]
