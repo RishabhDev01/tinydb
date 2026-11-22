@@ -29,8 +29,8 @@ ROOT = Path.cwd()
 PROMPTS = Path(__file__).parent / "prompts"
 
 MODELS = {
-    "planner": os.environ.get("PLANNER_MODEL", "openai/gpt-oss-120b"),
-    "builder": os.environ.get("BUILDER_MODEL", "openai/gpt-oss-120b"),
+    "planner": os.environ.get("PLANNER_MODEL", "gemini-3.8-flash"),
+    "builder": os.environ.get("BUILDER_MODEL", "gemini-3.8-flash"),
     "judge": os.environ.get("JUDGE_MODEL", "qwen/qwen3.8-27b"),
     "guard": os.environ.get("GUARD_MODEL",
                             "meta-llama/llama-prompt-guard-2-86m"),
