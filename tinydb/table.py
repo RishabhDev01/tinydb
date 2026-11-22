@@ -448,8 +448,13 @@ class Table:
         if callable(fields):
             def perform_update(table, doc_id):
                 # Update documents by calling the update function provided by
-                # the user
-                fields(table[doc_id])
+                # the user. A document the function cannot handle (e.g. one
+                # that lacks the field) is left as it is, so one odd document
+                # no longer aborts the update for all the others.
+                try:
+                    fields(table[doc_id])
+                except (KeyError, TypeError):
+                    pass
         else:
             def perform_update(table, doc_id):
                 # Update documents by setting all fields from the provided data
