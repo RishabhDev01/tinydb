@@ -18,7 +18,7 @@ def test_search_mutation_does_not_affect_subsequent_search():
 
 
 def test_search_nested_mutation_does_not_affect_subsequent_search():
-    """AC-2: Modifying nested structures in search result does not affect subsequent search."""
+    """AC-2: Modifying nested structures does not affect subsequent search."""
     db = TinyDB(storage=MemoryStorage)
     table = db.table('_default')
     table.insert({'name': 'alice', 'details': {'city': 'London'}})
@@ -31,7 +31,7 @@ def test_search_nested_mutation_does_not_affect_subsequent_search():
 
 
 def test_search_preserves_document_type_and_doc_id():
-    """AC-3: Uncached and repeated search results preserve Document type and doc_id."""
+    """AC-3: Uncached and repeated search preserves Document type and id."""
     db = TinyDB(storage=MemoryStorage)
     table = db.table('_default')
     doc_id = table.insert({'name': 'alice'})

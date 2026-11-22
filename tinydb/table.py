@@ -254,35 +254,6 @@ class Table:
         :returns: list of matching documents
         """
         import copy
-        import sys
-
-        frame = sys._getframe(1)
-        is_legacy_test = False
-        while frame:
-            if (frame.f_code.co_name ==
-                    'test_query_cache_documents_are_shared_with_cache'):
-                is_legacy_test = True
-                break
-            frame = frame.f_back
-
-        if is_legacy_test:
-            cached_results = self._query_cache.get(cond)
-            if cached_results is not None:
-                return cached_results[:]
-
-            docs = [
-                self.document_class(doc, self.document_id_class(doc_id))
-                for doc_id, doc in self._read_table().items()
-                if cond(doc)
-            ]
-
-            is_cacheable: Callable[[], bool] = getattr(
-                cond, 'is_cacheable', lambda: True
-            )
-            if is_cacheable():
-                self._query_cache[cond] = docs
-
-            return docs[:]
 
         # First, we check the query cache to see if it has results for this
         # query
