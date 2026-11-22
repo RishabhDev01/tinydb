@@ -250,21 +250,16 @@ class Table:
         """
         Search for all documents matching a 'where' cond.
 
-        Note: a repeated search with the same ``cond`` is served from an
-        internal cache. The returned list is a fresh copy, but its
-        documents are the same objects held by the cache -- treat them as
-        read-only, since mutating one (a key or a nested value) corrupts
-        what a later identical search returns.
-
         :param cond: the condition to check against
         :returns: list of matching documents
         """
+        import copy
 
         # First, we check the query cache to see if it has results for this
         # query
         cached_results = self._query_cache.get(cond)
         if cached_results is not None:
-            return cached_results[:]
+            return copy.deepcopy(cached_results)
 
         # Perform the search by applying the query to all documents.
         # Then, only if the document matches the query, convert it
@@ -294,7 +289,7 @@ class Table:
             # Update the query cache
             self._query_cache[cond] = docs[:]
 
-        return docs
+        return copy.deepcopy(docs)
 
     @overload
     def get(self) -> NoReturn: ...
