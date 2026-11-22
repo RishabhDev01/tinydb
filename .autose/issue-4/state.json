@@ -1,0 +1,93 @@
+{
+  "issue": 4,
+  "round": 1,
+  "branch": "autose/issue-4",
+  "run": "https://github.com/RishabhDev01/tinydb/actions/runs/44990628889",
+  "models": {
+    "planner": "gemini-3.8-flash",
+    "builder": "gemini-3.8-flash",
+    "judge": "qwen/qwen3.8-27b",
+    "guard": "meta-llama/llama-prompt-guard-2-86m"
+  },
+  "attempts": {},
+  "design_reentries": 0,
+  "status": "stopped",
+  "history": [
+    {
+      "t": "2026-11-22T05:43:51Z",
+      "round": 1,
+      "stage": "setup",
+      "result": "ok",
+      "detail": "start=guard base=a326ed4"
+    },
+    {
+      "t": "2026-11-22T05:43:54Z",
+      "round": 1,
+      "stage": "guard",
+      "result": "pass",
+      "detail": "max score 0.001"
+    },
+    {
+      "t": "2026-11-22T05:44:35Z",
+      "round": 1,
+      "stage": "spec",
+      "result": "pass",
+      "detail": "5 ACs, attempt 1"
+    },
+    {
+      "t": "2026-11-22T05:45:16Z",
+      "round": 1,
+      "stage": "design",
+      "result": "STOPPED",
+      "detail": "BudgetExceeded: planner used 153744 tokens, budget 150000"
+    }
+  ],
+  "tokens": {
+    "guard": {
+      "prompt": 260,
+      "completion": 0,
+      "calls": 1
+    },
+    "planner": {
+      "prompt": 151593,
+      "completion": 2151,
+      "calls": 34
+    },
+    "judge": {
+      "prompt": 564,
+      "completion": 230,
+      "calls": 1
+    }
+  },
+  "updated": "2026-11-22T05:45:16Z",
+  "baseline_passed": 227,
+  "next": "design",
+  "guard": {
+    "max_score": 0.0009525002096779644,
+    "chunks": 1
+  },
+  "judge": {
+    "AC-1": {
+      "testable": true,
+      "reason": "Concrete input, single call, and exact observable outputs (return value and table state) are specified."
+    },
+    "AC-2": {
+      "testable": true,
+      "reason": "Concrete input, single call, and exact observable outputs (return value and specific document content) are specified."
+    },
+    "AC-3": {
+      "testable": true,
+      "reason": "Concrete input, single call, and exact observable results (object equality and type check) are specified."
+    },
+    "AC-4": {
+      "testable": true,
+      "reason": "Concrete input, single call, and exact observable outputs (return value and table state) are specified."
+    },
+    "AC-5": {
+      "testable": true,
+      "reason": "Concrete input, single call, and exact observable outputs (return value and table length) are specified."
+    }
+  },
+  "stopped_at": "design",
+  "stop_reason": "BudgetExceeded: planner used 153744 tokens, budget 150000"
+}
