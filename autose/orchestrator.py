@@ -21,7 +21,7 @@ from pathlib import Path
 
 from . import checks, gh, patcher
 from .agent import AgentStopped, run_agent
-from .llm import (USAGE, BudgetExceeded, LLMError, QuotaExhausted,
+from .llm import (LAST_FINISH, USAGE, BudgetExceeded, LLMError, QuotaExhausted,
                   RequestTooLarge, chat, extract_json, log, strip_think)
 from .tools import Workspace, clip, run_pytest, toolset
 
@@ -39,12 +39,15 @@ BUDGET = {  # tokens per agent per run (ADR-009)
     # ADR-022: spec + design share this. 150k was sized for Groq's 8k TPM;
     # on Gemini run 17 used 126k and run 20 hit 153k in design (~$0.12).
     "planner": int(os.environ.get("PLANNER_BUDGET", "400000")),
-    "builder": int(os.environ.get("BUILDER_BUDGET", "120000")),
+    "builder": int(os.environ.get("BUILDER_BUDGET", "200000")),
     "judge": 30000,
 }
 # ADR-016: "patch" = localize -> one-shot patch -> validate (default);
 # "agent" = the earlier free tool loop (ADR-005/014), kept for comparison.
 BUILDER_MODE = os.environ.get("BUILDER_MODE", "patch")
+# ADR-023: Gemini counts thinking as output. 3000 cut off run 21's answers
+# (3 functions + tests); 12k is about $0.045 per call on 3.8 Flash.
+BUILDER_MAX_TOKENS = int(os.environ.get("BUILDER_MAX_TOKENS", "12000"))
 MAX_IMPLEMENT_ATTEMPTS = 3
 MAX_DESIGN_REENTRIES = 1
 MAX_SPEC_REDOS = 1
@@ -476,7 +479,8 @@ class Run:
                     reply = chat("builder", MODELS["builder"], [
                         {"role": "system", "content": system},
                         {"role": "user", "content": user}],
-                        max_tokens=3000, budget=BUDGET["builder"])
+                        max_tokens=BUILDER_MAX_TOKENS,
+                        budget=BUDGET["builder"])
                     text = strip_think(reply.content or "")
                     break
                 except RequestTooLarge as e:
@@ -494,6 +498,12 @@ class Run:
                     ROOT, self.base)}
                 msg = (f"YOUR ANSWER COULD NOT BE APPLIED: {e}. Answer again "
                        "in exactly the required format.")
+                if LAST_FINISH.get("builder") == "length":
+                    msg = ("YOUR ANSWER WAS CUT OFF at the output limit "
+                           f"({BUILDER_MAX_TOKENS} tokens) before it was "
+                           f"complete ({e}). Answer again, shorter: replace "
+                           "only the definitions that must change, keep "
+                           "comments brief, and one short test per AC.")
             attempts_log.append((n, ok, msg.splitlines()[0][:150]))
             self.write_test_report(report, attempts_log, summary)
             self.write_patch()

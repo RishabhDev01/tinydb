@@ -19,6 +19,9 @@ MAX_RETRIES = int(os.environ.get("AUTOSE_MAX_RETRIES", "10"))
 
 # role -> {"prompt": int, "completion": int, "calls": int}
 USAGE: dict = {}
+# Why the last reply of each role ended ("stop", "length", ...).
+# ADR-023: a reply cut off at max_tokens must be reported as such.
+LAST_FINISH: dict = {}
 
 
 
@@ -210,6 +213,10 @@ def chat(role: str, model: str, messages: list, tools: list | None = None,
         u["prompt"] += resp.usage.prompt_tokens or 0
         u["completion"] += resp.usage.completion_tokens or 0
     u["calls"] += 1
+    LAST_FINISH[role] = resp.choices[0].finish_reason
+    if LAST_FINISH[role] == "length":
+        u["truncated"] = u.get("truncated", 0) + 1
+        log(f"{role}: reply cut off at max_tokens={max_tokens}")
     if budget and total_tokens(role) > budget:
         raise BudgetExceeded(f"{role} used {total_tokens(role)} tokens, "
                              f"budget {budget}")
