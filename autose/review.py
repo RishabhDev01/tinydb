@@ -21,7 +21,8 @@ from .llm import USAGE, BudgetExceeded, LLMError
 from .tools import Workspace, clip, toolset
 
 ROOT = Path.cwd()
-MODEL = os.environ.get("REVIEWER_MODEL", "qwen/qwen3.8-27b")
+# ADR-021: a different Gemini series from the builder (gemini-3.8-flash).
+MODEL = os.environ.get("REVIEWER_MODEL", "gemini-4-hydrogen")
 BUDGET = int(os.environ.get("REVIEWER_BUDGET", "250000"))
 
 ITEM = {"type": "object"}
@@ -148,7 +149,9 @@ def main() -> int:
             v = run_agent(role="reviewer", model=MODEL, messages=msgs,
                           tools=tools, impl=impl,
                           finish_schema=VERDICT_SCHEMA, max_turns=25,
-                          budget=BUDGET, max_chars=15000)
+                          budget=BUDGET, max_chars=15000,
+                          # Gemini counts thinking as output (ADR-021).
+                          max_tokens=3000)
             problems = validate(v, ran["tests"])
             if not problems:
                 verdict = v
