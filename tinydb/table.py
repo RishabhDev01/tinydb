@@ -342,30 +342,41 @@ class Table:
     ):
         """
         Get document(s) specified by a query or document ID(s).
+
+        - With ``cond`` or ``doc_id``: returns a single document, or ``None``
+          if no match exists. If multiple documents match ``cond``, the first
+          match in insertion order is returned.
+        - With ``doc_ids``: returns a list of matching documents (possibly
+          empty).
+
+        :param cond: the condition to check against
+        :param doc_id: the document's ID
+        :param doc_ids: the document's IDs (multiple)
+
+        :returns: a document, ``None``, or a list of documents when
+                  ``doc_ids`` is used
         """
         table = self._read_table()
 
         if doc_id is not None:
-            try:
-                resolved_id = self.document_id_class(doc_id)
-            except (ValueError, TypeError):
-                resolved_id = doc_id
-
-            raw_doc = table.get(resolved_id, None)
+            # Retrieve a document specified by its ID
+            raw_doc = table.get(str(doc_id), None)
 
             if raw_doc is None:
                 return None
 
-            return self.document_class(raw_doc, resolved_id)
+            # Convert the raw data to the document class
+            return self.document_class(raw_doc, self.document_id_class(doc_id))
 
         elif doc_ids is not None:
-            doc_ids_set = set()
-            for d in doc_ids:
-                try:
-                    doc_ids_set.add(self.document_id_class(d))
-                except (ValueError, TypeError):
-                    doc_ids_set.add(d)
+            # Filter the table by extracting out all those documents which
+            # have doc id specified in the doc_id list.
 
+            # Since document IDs will be unique, we make it a set to ensure
+            # constant time lookup
+            doc_ids_set = set(str(doc_id) for doc_id in doc_ids)
+
+            # Now return the filtered documents in form of list
             return [
                 self.document_class(doc, self.document_id_class(doc_id))
                 for doc_id, doc in table.items()
@@ -373,6 +384,11 @@ class Table:
             ]
 
         elif cond is not None:
+            # Find a document specified by a query
+            # The trailing underscore in doc_id_ is needed so MyPy
+            # doesn't think that `doc_id_` (which is a string) needs
+            # to have the same type as `doc_id` which is this function's
+            # parameter and is an optional `int`.
             for doc_id_, doc in self._read_table().items():
                 if cond(doc):
                     return self.document_class(
@@ -416,55 +432,105 @@ class Table:
     ) -> list[int]:
         """
         Update all matching documents to have a given set of fields.
+
+        When ``doc_ids`` is given, IDs that don't refer to an existing
+        document are silently skipped, and the returned list only contains
+        the IDs that were actually updated.
+
+        :param fields: the fields that the matching documents will have
+                       or a callable that mutates matching documents in place
+        :param cond: which documents to update
+        :param doc_ids: a list of document IDs
+        :returns: a list containing the updated document's ID
         """
+
+        # Define the function that will perform the update
         if callable(fields):
             def perform_update(table, doc_id):
+                # Update documents by calling the update function provided by
+                # the user
                 fields(table[doc_id])
         else:
             def perform_update(table, doc_id):
+                # Update documents by setting all fields from the provided data
                 table[doc_id].update(fields)
 
         if doc_ids is not None:
-            requested_ids = []
-            for d in doc_ids:
+            # Perform the update operation for documents specified by a list
+            # of document IDs. Document IDs that don't exist in the table are
+            # silently skipped, mirroring the behaviour of ``get(doc_ids=...)``
+            # (see issue #591). The list of *actually* updated IDs is
+            # determined inside the updater so it reflects the table state at
+            # write time.
+            requested_ids: list[int] = []
+            for doc_id in doc_ids:
                 try:
-                    requested_ids.append(self.document_id_class(d))
+                    requested_ids.append(self.document_id_class(doc_id))
                 except (ValueError, TypeError):
-                    requested_ids.append(d)
+                    continue
             updated_ids: list[int] = []
 
             def updater(table: dict):
+                # Filter to IDs that exist *before* performing any updates,
+                # so the operation is atomic: either every existing target is
+                # updated, or none is.
                 updated_ids.extend(
                     doc_id for doc_id in requested_ids if doc_id in table
                 )
                 for doc_id in updated_ids:
                     perform_update(table, doc_id)
 
+            # Perform the update operation (see _update_table for details)
             self._update_table(updater)
+
             return updated_ids
 
         elif cond is not None:
+            # Perform the update operation for documents specified by a query
+
+            # Collect affected doc_ids
             updated_ids = []
 
             def updater(table: dict):
                 _cond = cast(QueryLike, cond)
+
+                # We need to convert the keys iterator to a list because
+                # we may remove entries from the ``table`` dict during
+                # iteration and doing this without the list conversion would
+                # result in an exception (RuntimeError: dictionary changed size
+                # during iteration)
                 for doc_id in list(table.keys()):
+                    # Pass through all documents to find documents matching the
+                    # query. Call the processing callback with the document ID
                     if _cond(table[doc_id]):
+                        # Add ID to list of updated documents
                         updated_ids.append(doc_id)
+
+                        # Perform the update (see above)
                         perform_update(table, doc_id)
 
+            # Perform the update operation (see _update_table for details)
             self._update_table(updater)
+
             return updated_ids
 
         else:
+            # Update all documents unconditionally
+
             updated_ids = []
 
             def updater(table: dict):
+                # Process all documents
                 for doc_id in list(table.keys()):
+                    # Add ID to list of updated documents
                     updated_ids.append(doc_id)
+
+                    # Perform the update (see above)
                     perform_update(table, doc_id)
 
+            # Perform the update operation (see _update_table for details)
             self._update_table(updater)
+
             return updated_ids
 
     def update_multiple(
@@ -568,37 +634,73 @@ class Table:
     ) -> list[int]:
         """
         Remove all matching documents.
+
+        When ``doc_ids`` is given, IDs that don't refer to an existing
+        document are silently skipped, and the returned list only contains
+        the IDs that were actually removed.
+
+        :param cond: the condition to check against
+        :param doc_ids: a list of document IDs
+        :returns: a list containing the removed documents' ID
         """
         if doc_ids is not None:
-            requested_ids = []
-            for d in doc_ids:
+            # This function returns the list of IDs for the documents that
+            # have been removed. Document IDs that don't exist in the table
+            # are silently skipped, mirroring the behaviour of
+            # ``get(doc_ids=...)`` (see issue #591). The list of *actually*
+            # removed IDs is determined inside the updater so it reflects the
+            # table state at write time.
+            requested_ids: list[int] = []
+            for doc_id in doc_ids:
                 try:
-                    requested_ids.append(self.document_id_class(d))
+                    requested_ids.append(self.document_id_class(doc_id))
                 except (ValueError, TypeError):
-                    requested_ids.append(d)
+                    continue
             removed_ids: list[int] = []
 
             def updater(table: dict):
+                # Filter to IDs that exist *before* performing any removals,
+                # so the operation is atomic: either every existing target is
+                # removed, or none is.
                 removed_ids.extend(
                     doc_id for doc_id in requested_ids if doc_id in table
                 )
                 for doc_id in removed_ids:
                     del table[doc_id]
 
+            # Perform the remove operation
             self._update_table(updater)
+
             return removed_ids
 
         if cond is not None:
             removed_ids = []
 
+            # This updater function will be called with the table data
+            # as its first argument. See ``Table._update`` for details on this
+            # operation
             def updater(table: dict):
+                # We need to convince MyPy (the static type checker) that
+                # the ``cond is not None`` invariant still holds true when
+                # the updater function is called
                 _cond = cast(QueryLike, cond)
+
+                # We need to convert the keys iterator to a list because
+                # we may remove entries from the ``table`` dict during
+                # iteration and doing this without the list conversion would
+                # result in an exception (RuntimeError: dictionary changed size
+                # during iteration)
                 for doc_id in list(table.keys()):
                     if _cond(table[doc_id]):
+                        # Add document ID to list of removed document IDs
                         removed_ids.append(doc_id)
+
+                        # Remove document from the table
                         table.pop(doc_id)
 
+            # Perform the remove operation
             self._update_table(updater)
+
             return removed_ids
 
         raise RuntimeError('Use truncate() to remove all documents')

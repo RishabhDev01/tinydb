@@ -1,319 +1,106 @@
 diff --git a/tinydb/table.py b/tinydb/table.py
-index 76470aa..d413ee0 100644
+index 76470aa..839087a 100644
 --- a/tinydb/table.py
 +++ b/tinydb/table.py
-@@ -342,41 +342,30 @@ class Table:
-     ):
-         """
-         Get document(s) specified by a query or document ID(s).
--
--        - With ``cond`` or ``doc_id``: returns a single document, or ``None``
--          if no match exists. If multiple documents match ``cond``, the first
--          match in insertion order is returned.
--        - With ``doc_ids``: returns a list of matching documents (possibly
--          empty).
--
--        :param cond: the condition to check against
--        :param doc_id: the document's ID
--        :param doc_ids: the document's IDs (multiple)
--
--        :returns: a document, ``None``, or a list of documents when
--                  ``doc_ids`` is used
-         """
-         table = self._read_table()
- 
-         if doc_id is not None:
--            # Retrieve a document specified by its ID
--            raw_doc = table.get(str(doc_id), None)
-+            try:
-+                resolved_id = self.document_id_class(doc_id)
-+            except (ValueError, TypeError):
-+                resolved_id = doc_id
-+
-+            raw_doc = table.get(resolved_id, None)
- 
-             if raw_doc is None:
+@@ -366,7 +366,7 @@ class Table:
                  return None
  
--            # Convert the raw data to the document class
+             # Convert the raw data to the document class
 -            return self.document_class(raw_doc, doc_id)
-+            return self.document_class(raw_doc, resolved_id)
++            return self.document_class(raw_doc, self.document_id_class(doc_id))
  
          elif doc_ids is not None:
--            # Filter the table by extracting out all those documents which
--            # have doc id specified in the doc_id list.
--
--            # Since document IDs will be unique, we make it a set to ensure
--            # constant time lookup
--            doc_ids_set = set(str(doc_id) for doc_id in doc_ids)
-+            doc_ids_set = set()
-+            for d in doc_ids:
-+                try:
-+                    doc_ids_set.add(self.document_id_class(d))
-+                except (ValueError, TypeError):
-+                    doc_ids_set.add(d)
- 
--            # Now return the filtered documents in form of list
-             return [
-                 self.document_class(doc, self.document_id_class(doc_id))
-                 for doc_id, doc in table.items()
-@@ -384,11 +373,6 @@ class Table:
-             ]
- 
-         elif cond is not None:
--            # Find a document specified by a query
--            # The trailing underscore in doc_id_ is needed so MyPy
--            # doesn't think that `doc_id_` (which is a string) needs
--            # to have the same type as `doc_id` which is this function's
--            # parameter and is an optional `int`.
-             for doc_id_, doc in self._read_table().items():
-                 if cond(doc):
-                     return self.document_class(
-@@ -432,100 +416,55 @@ class Table:
-     ) -> list[int]:
-         """
-         Update all matching documents to have a given set of fields.
--
--        When ``doc_ids`` is given, IDs that don't refer to an existing
--        document are silently skipped, and the returned list only contains
--        the IDs that were actually updated.
--
--        :param fields: the fields that the matching documents will have
--                       or a callable that mutates matching documents in place
--        :param cond: which documents to update
--        :param doc_ids: a list of document IDs
--        :returns: a list containing the updated document's ID
-         """
--
--        # Define the function that will perform the update
-         if callable(fields):
-             def perform_update(table, doc_id):
--                # Update documents by calling the update function provided by
--                # the user
-                 fields(table[doc_id])
-         else:
-             def perform_update(table, doc_id):
--                # Update documents by setting all fields from the provided data
-                 table[doc_id].update(fields)
- 
-         if doc_ids is not None:
--            # Perform the update operation for documents specified by a list
--            # of document IDs. Document IDs that don't exist in the table are
--            # silently skipped, mirroring the behaviour of ``get(doc_ids=...)``
--            # (see issue #591). The list of *actually* updated IDs is
--            # determined inside the updater so it reflects the table state at
--            # write time.
+             # Filter the table by extracting out all those documents which
+@@ -462,7 +462,12 @@ class Table:
+             # (see issue #591). The list of *actually* updated IDs is
+             # determined inside the updater so it reflects the table state at
+             # write time.
 -            requested_ids = list(doc_ids)
-+            requested_ids = []
-+            for d in doc_ids:
++            requested_ids: list[int] = []
++            for doc_id in doc_ids:
 +                try:
-+                    requested_ids.append(self.document_id_class(d))
++                    requested_ids.append(self.document_id_class(doc_id))
 +                except (ValueError, TypeError):
-+                    requested_ids.append(d)
++                    continue
              updated_ids: list[int] = []
  
              def updater(table: dict):
--                # Filter to IDs that exist *before* performing any updates,
--                # so the operation is atomic: either every existing target is
--                # updated, or none is.
-                 updated_ids.extend(
-                     doc_id for doc_id in requested_ids if doc_id in table
-                 )
-                 for doc_id in updated_ids:
-                     perform_update(table, doc_id)
- 
--            # Perform the update operation (see _update_table for details)
-             self._update_table(updater)
--
-             return updated_ids
- 
-         elif cond is not None:
--            # Perform the update operation for documents specified by a query
--
--            # Collect affected doc_ids
-             updated_ids = []
- 
-             def updater(table: dict):
-                 _cond = cast(QueryLike, cond)
--
--                # We need to convert the keys iterator to a list because
--                # we may remove entries from the ``table`` dict during
--                # iteration and doing this without the list conversion would
--                # result in an exception (RuntimeError: dictionary changed size
--                # during iteration)
-                 for doc_id in list(table.keys()):
--                    # Pass through all documents to find documents matching the
--                    # query. Call the processing callback with the document ID
-                     if _cond(table[doc_id]):
--                        # Add ID to list of updated documents
-                         updated_ids.append(doc_id)
--
--                        # Perform the update (see above)
-                         perform_update(table, doc_id)
- 
--            # Perform the update operation (see _update_table for details)
-             self._update_table(updater)
--
-             return updated_ids
- 
-         else:
--            # Update all documents unconditionally
--
-             updated_ids = []
- 
-             def updater(table: dict):
--                # Process all documents
-                 for doc_id in list(table.keys()):
--                    # Add ID to list of updated documents
-                     updated_ids.append(doc_id)
--
--                    # Perform the update (see above)
-                     perform_update(table, doc_id)
- 
--            # Perform the update operation (see _update_table for details)
-             self._update_table(updater)
--
-             return updated_ids
- 
-     def update_multiple(
-@@ -629,68 +568,37 @@ class Table:
-     ) -> list[int]:
-         """
-         Remove all matching documents.
--
--        When ``doc_ids`` is given, IDs that don't refer to an existing
--        document are silently skipped, and the returned list only contains
--        the IDs that were actually removed.
--
--        :param cond: the condition to check against
--        :param doc_ids: a list of document IDs
--        :returns: a list containing the removed documents' ID
-         """
-         if doc_ids is not None:
--            # This function returns the list of IDs for the documents that
--            # have been removed. Document IDs that don't exist in the table
--            # are silently skipped, mirroring the behaviour of
--            # ``get(doc_ids=...)`` (see issue #591). The list of *actually*
--            # removed IDs is determined inside the updater so it reflects the
--            # table state at write time.
+@@ -645,7 +650,12 @@ class Table:
+             # ``get(doc_ids=...)`` (see issue #591). The list of *actually*
+             # removed IDs is determined inside the updater so it reflects the
+             # table state at write time.
 -            requested_ids = list(doc_ids)
-+            requested_ids = []
-+            for d in doc_ids:
++            requested_ids: list[int] = []
++            for doc_id in doc_ids:
 +                try:
-+                    requested_ids.append(self.document_id_class(d))
++                    requested_ids.append(self.document_id_class(doc_id))
 +                except (ValueError, TypeError):
-+                    requested_ids.append(d)
++                    continue
              removed_ids: list[int] = []
  
              def updater(table: dict):
--                # Filter to IDs that exist *before* performing any removals,
--                # so the operation is atomic: either every existing target is
--                # removed, or none is.
-                 removed_ids.extend(
-                     doc_id for doc_id in requested_ids if doc_id in table
-                 )
-                 for doc_id in removed_ids:
-                     del table[doc_id]
- 
--            # Perform the remove operation
-             self._update_table(updater)
--
-             return removed_ids
- 
-         if cond is not None:
-             removed_ids = []
- 
--            # This updater function will be called with the table data
--            # as its first argument. See ``Table._update`` for details on this
--            # operation
-             def updater(table: dict):
--                # We need to convince MyPy (the static type checker) that
--                # the ``cond is not None`` invariant still holds true when
--                # the updater function is called
-                 _cond = cast(QueryLike, cond)
--
--                # We need to convert the keys iterator to a list because
--                # we may remove entries from the ``table`` dict during
--                # iteration and doing this without the list conversion would
--                # result in an exception (RuntimeError: dictionary changed size
--                # during iteration)
-                 for doc_id in list(table.keys()):
-                     if _cond(table[doc_id]):
--                        # Add document ID to list of removed document IDs
-                         removed_ids.append(doc_id)
--
--                        # Remove document from the table
-                         table.pop(doc_id)
- 
--            # Perform the remove operation
-             self._update_table(updater)
--
-             return removed_ids
- 
-         raise RuntimeError('Use truncate() to remove all documents')
 diff --git a/tests/test_autose_issue_4.py b/tests/test_autose_issue_4.py
 new file mode 100644
-index 0000000..4b3c351
+index 0000000..7c6ee07
 --- /dev/null
 +++ b/tests/test_autose_issue_4.py
-@@ -0,0 +1,60 @@
+@@ -0,0 +1,59 @@
 +from tinydb import TinyDB
 +from tinydb.storages import MemoryStorage
 +from tinydb.table import Document
 +
 +
-+def test_remove_string_doc_ids():
++def test_ac1_remove_string_doc_ids():
 +    """AC-1: Remove documents with string doc_ids."""
 +    db = TinyDB(storage=MemoryStorage)
-+    doc_id = db.insert({'name': 'a'})
-+    assert doc_id == 1
++    db.insert({'name': 'a'})
 +
-+    result = db.remove(doc_ids=['1'])
-+    assert result == [1]
++    res = db.remove(doc_ids=['1'])
++
++    assert res == [1]
 +    assert db.all() == []
 +
 +
-+def test_update_string_doc_ids():
++def test_ac2_update_string_doc_ids():
 +    """AC-2: Update documents with string doc_ids."""
 +    db = TinyDB(storage=MemoryStorage)
-+    doc_id = db.insert({'name': 'a'})
-+    assert doc_id == 1
++    db.insert({'name': 'a'})
 +
-+    result = db.update({'name': 'b'}, doc_ids=['1'])
-+    assert result == [1]
-+    doc = db.get(doc_id=1)
-+    assert doc == Document({'name': 'b'}, doc_id=1)
++    res = db.update({'name': 'b'}, doc_ids=['1'])
++
++    assert res == [1]
++    assert db.get(doc_id=1) == Document({'name': 'b'}, doc_id=1)
 +
 +
-+def test_get_string_doc_id():
++def test_ac3_get_string_doc_id():
 +    """AC-3: Get document with string doc_id returns integer doc_id attribute."""
 +    db = TinyDB(storage=MemoryStorage)
-+    doc_id = db.insert({'name': 'a'})
-+    assert doc_id == 1
++    db.insert({'name': 'a'})
 +
 +    doc = db.get(doc_id='1')
++
 +    assert doc == Document({'name': 'a'}, doc_id=1)
 +    assert doc.doc_id == 1
-+    assert isinstance(doc.doc_id, int) is True
++    assert isinstance(doc.doc_id, int)
 +
 +
-+def test_remove_integer_doc_ids_unchanged():
++def test_ac4_integer_doc_ids_unchanged():
 +    """AC-4: Integer doc_ids behaviour unchanged."""
 +    db = TinyDB(storage=MemoryStorage)
-+    doc_id = db.insert({'name': 'a'})
-+    assert doc_id == 1
++    db.insert({'name': 'a'})
 +
-+    result = db.remove(doc_ids=[1])
-+    assert result == [1]
++    res = db.remove(doc_ids=[1])
++
++    assert res == [1]
 +    assert db.all() == []
 +
 +
-+def test_remove_nonexistent_string_doc_id():
++def test_ac5_non_existent_string_doc_id():
 +    """AC-5: Non-existent or non-matching string doc_id returns empty result."""
 +    db = TinyDB(storage=MemoryStorage)
-+    doc_id = db.insert({'name': 'a'})
-+    assert doc_id == 1
++    db.insert({'name': 'a'})
 +
-+    result = db.remove(doc_ids=['999'])
-+    assert result == []
++    res = db.remove(doc_ids=['999'])
++
++    assert res == []
 +    assert len(db) == 1
