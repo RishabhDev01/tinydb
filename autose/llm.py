@@ -47,7 +47,10 @@ class QuotaExhausted(LLMError):
 LONG_WAIT_S = float(os.environ.get("AUTOSE_LONG_WAIT_S", "90"))
 # ADR-019: Gemini (paid) first, then Groq's free gpt-oss models.
 _DEFAULT_FALLBACK = ("gemini-3.8-flash>openai/gpt-oss-120b,"
-                     "openai/gpt-oss-120b>openai/gpt-oss-20b")
+                     "openai/gpt-oss-120b>openai/gpt-oss-20b,"
+                     # Reviewer (ADR-021): never falls back to the
+                     # builder's model family.
+                     "gemini-4-hydrogen>qwen/qwen3.8-27b")
 FALLBACK = dict(pair.split(">", 1) for pair in os.environ.get(
     "AUTOSE_FALLBACK", _DEFAULT_FALLBACK).split(",") if ">" in pair)
 _EXHAUSTED: dict = {}  # model -> seconds Groq asked us to wait
