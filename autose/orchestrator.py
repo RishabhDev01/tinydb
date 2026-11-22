@@ -191,6 +191,7 @@ class Run:
                            + left[:300])
             self.state["attempts"] = {}
             self.state["design_reentries"] = 0
+            self.state["conflicts"] = {}
         self.state["status"] = "running"
         self.event("setup", "ok", f"start={start} base={self.base[:7]}")
         gh.comment_issue(self.n, f"**AutoSE** round {self.round} started "
@@ -366,6 +367,19 @@ class Run:
         if not any(f.startswith("tinydb/") for f in files):
             return False, "no change under tinydb/ yet; implement the " \
                 "design.", report
+        # ADR-026: production code must not detect or special-case tests
+        # (run 27 passed CI by checking the caller's function name).
+        gaming = checks.test_gaming(gh.run(
+            ["git", "diff", self.base, "--", "tinydb"], check=False))
+        if gaming:
+            report["gaming"] = gaming
+            return False, ("TEST GAMING (stage 3 check): production code "
+                           "must never detect or special-case tests. "
+                           "Remove these lines:\n- " + "\n- ".join(gaming) +
+                           "\nIf an existing test pins the behaviour the "
+                           "issue asks to change, do not work around it: "
+                           "implement the requested behaviour and name "
+                           "that test in SUMMARY."), report
         ok, out = checks.check_build(ROOT)
         report["build"] = ok
         if not ok:
@@ -374,7 +388,8 @@ class Run:
         code, out = run_pytest(ROOT)
         counts = checks.pytest_counts(out)
         report.update(pytest_exit=code, counts=counts,
-                      pytest_tail=clip(out, 2500, tail=True))
+                      pytest_tail=clip(out, 2500, tail=True),
+                      failing=checks.failing_tests(out))
         if code != 0:
             # ADR-024: name each failing test with its line and first error,
             # not the raw tail of the output (run 22).
@@ -533,10 +548,37 @@ class Run:
                 self.event("implement+test", "pass", f"attempt {n}")
                 return "release"
             self.event("implement+test", "fail", f"attempt {n}: {msg}")
+            self.check_conflict(report.get("failing", []), test_path)
             failure = (f"## Attempt {n} FAILED the orchestrator's check\n"
                        "Fix the cause in the code (do not weaken the tests) "
                        f"and answer again in the same format.\n\n{msg}")
         return self.after_failed_attempts(msg)
+
+    def check_conflict(self, failing: list, test_path: str) -> None:
+        """ADR-026: stop when only existing tests keep failing, the same
+        way, under two designs. In run 27 one existing test pinned the very
+        behaviour the issue asked to change; the run retried until the
+        builder special-cased that test. Changing pinned behaviour is a
+        maintainer's decision, and AutoSE does not edit existing tests."""
+        if not failing or any(t.startswith(test_path + "::")
+                              for t in failing):
+            return
+        seen = self.state.setdefault("conflicts", {}) \
+            .setdefault(f"r{self.round}", [])
+        seen.append({"design": self.state["design_reentries"],
+                     "tests": failing})
+        same = [s for s in seen if s["tests"] == failing]
+        if len(same) >= 3 and len({s["design"] for s in same}) >= 2:
+            raise Stop("test", (
+                "CONFLICT WITH EXISTING BEHAVIOUR: in "
+                f"{len(same)} attempts under 2 designs, the only failing "
+                "tests were existing tests that pin the current behaviour: "
+                + ", ".join(f"`{t}`" for t in failing) + ". The issue seems "
+                "to ask for a change to behaviour that the project "
+                "documents and tests (see ARCHITECTURE.md §4). AutoSE does "
+                "not edit existing tests, so a maintainer must decide: "
+                "change that behaviour (update the test, then comment "
+                "`/autose`) or decline the issue."))
 
     def after_failed_attempts(self, msg: str) -> str:
         key = f"r{self.round}"

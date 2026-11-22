@@ -21,6 +21,7 @@ How to edit:
 - Always write every definition in full. Never write `...`, "unchanged" or "rest of the code here".
 - Change only what the design and the acceptance criteria need. Keep the existing style: type hints, reST docstrings, lines of 79 characters or less.
 - Only `tinydb/*.py` may be edited. Tests go only in the TESTS block.
+- Never make production code detect or special-case tests (inspecting the call stack, checking test names, `PYTEST_CURRENT_TEST`, importing pytest). A checker rejects it. If an existing test pins the behaviour the issue asks to change, implement the requested behaviour anyway and name that test in SUMMARY; a maintainer decides.
 
 How to test:
 - Write one test function per acceptance criterion. Each test's docstring MUST start with its AC id, e.g. `"""AC-2: <behaviour being checked>."""`. A checker requires every AC id to appear in a test.

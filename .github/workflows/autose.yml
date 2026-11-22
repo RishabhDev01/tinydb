@@ -165,8 +165,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-      issues: write
-      actions: write         # re-dispatch for review round 2
+      issues: write          # round 2 is human-triggered (ADR-026): no actions: write
     steps:
       - uses: actions/checkout@v4
         with:

@@ -2,8 +2,12 @@
 ADR-008).
 
     approve                       -> comment, hand to human
-    changes and round < MAX       -> comment, re-dispatch at design/implement
+    changes and round < MAX       -> comment with the command for round 2
     changes and round == MAX      -> comment, hand to human
+
+ADR-026: round 2 is no longer dispatched by the bot. The gate rejects
+bot events (ADR-010), so run 28 never ran; and every run is started by a
+person. The comment gives the exact `/autose round 2 <stage>` to type.
 """
 import argparse
 import json
@@ -39,14 +43,14 @@ def main() -> int:
 
     if v["verdict"] == "changes" and a.round < MAX_REVIEW_ROUNDS:
         nxt = a.round + 1
-        gh.run(["gh", "workflow", "run", "autose.yml", "--repo", gh.repo(),
-                "--ref", "master", "-f", f"issue={a.issue}",
-                "-f", f"round={nxt}", "-f", f"start={v['target']}"])
         gh.run(["gh", "pr", "comment", str(a.pr), "--repo", gh.repo(),
-                "--body", f"**AutoSE:** the reviewer requested changes. "
-                f"Starting round {nxt} at stage `{v['target']}` "
-                f"(max {MAX_REVIEW_ROUNDS} review rounds)."])
-        gh.set_output(next="round-" + str(nxt))
+                "--body", f"**AutoSE:** the reviewer requested changes "
+                f"(route back to `{v['target']}`). A maintainer decides "
+                f"whether to continue. To start review round {nxt} of "
+                f"{MAX_REVIEW_ROUNDS}, comment:\n\n"
+                f"```\n/autose round {nxt} {v['target']}\n```\n\n"
+                "Otherwise close this PR. AutoSE never merges."])
+        gh.set_output(next="await-round-" + str(nxt))
         return 0
 
     why = "the reviewer approved" if v["verdict"] == "approve" else \
